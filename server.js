@@ -11,6 +11,8 @@ import { clipTaste, learnTaste, moreLikeThisNote, recordClipFeedback } from "./l
 import { LONG_FORMATS, normalizeLongDesign } from "./lib/longedit.js";
 import { clearAudience, getAudience, ingestSource, readSourceParts } from "./lib/audience.js";
 import { retitleClip } from "./lib/retitle.js";
+import { listLuts } from "./lib/luts.js";
+import { diskReport, tidyProject } from "./lib/tidy.js";
 import { generateQuestions, listQuestions, removeQuestion, setStatus as setQuestionStatus } from "./lib/intentional.js";
 import { getSettings as autoPostSettings, runAutoPost, startAutoPost, updateSettings as updateAutoPost } from "./lib/autopost.js";
 import { preflight, repairsFor, scoreReview, sensePass } from "./lib/review.js";
@@ -69,7 +71,10 @@ import {
 import { LENGTHS, VIBES, buildEditHtml, normalizeEditDesign, planTimeline } from "./lib/edit.js";
 import { createEdit } from "./lib/edits.js";
 import { AUDIO_EXT, SOUNDS_DIR, addTrack, getTrack, importFolder, listTracks, removeTrack, renameTrack } from "./lib/sounds.js";
-import { deleteProject, listProjects, loadProject, newProjectId, projectDir, saveProject } from "./lib/store.js";
+import { deleteProject, isAdProject, listProjects, loadProject, newProjectId, projectDir, saveProject } from "./lib/store.js";
+
+/** Clip-only work: picking, re-picking, re-titling and the full-video edits never apply to an ad. */
+const CLIP_ONLY = /\/(clips\/(propose|repick|retitle)|titles\/refresh|long)(\/|$)/;
 import { isLink, ytDlpPath } from "./lib/youtube.js";
 import {
   STUDY_MEDIA_DIR,
@@ -93,12 +98,15 @@ import { router as musicRouter } from "./music/index.js";
 import { router as editorRouter } from "./editor/index.js";
 import { router as resourcesRouter } from "./resources/index.js";
 import analytics from "./analytics/index.js";
+import { router as memoryRouter } from "./memory/index.js";
 import thumbnails from "./thumbnails/index.js";
+import ads from "./ads/index.js";
 import {
   CAN_PUBLISH,
   PUBLISHERS,
   addAccount,
   createPost,
+  postNow,
   deletePost,
   listAccounts,
   listPosts,
@@ -146,6 +154,8 @@ app.use("/api/music", musicRouter);
 app.use("/api/editor", editorRouter);
 // Assets: brand kit and resources (resources/, owned by the Assets session).
 app.use("/api/resources", resourcesRouter);
+// Memory: the company brain — profile, transcripts, playbooks (memory/, owned by the Memory session).
+app.use("/api/memory", memoryRouter);
 // Analytics: how posted clips and channels are doing (analytics/, owned by the Analytics session).
 app.use("/api/analytics", analytics.router);
 analytics.start();
@@ -153,6 +163,9 @@ analytics.start();
 // Thumbnails session; see thumbnails/README.md). start() is the watcher — the tab's switches turn it off.
 app.use("/api/thumbnails", thumbnails.router);
 thumbnails.start();
+// Ads Editor: raw ad footage → cut, graded, motion graphics + sound effects (ads/, Ads Editor session; ads/README.md).
+app.use("/api/ads", ads.router);
+ads.start();
 // Dope edits planner (edits/, DOPE CLIPS session; shared/EDIT_PLAN.md). It only plans here: lib/dope.js +
 // lib/editplan.js preview and render its plans with HyperFrames.
 const editsPlanner = createEditsIntegration({ sounds: { addTrack }, render: false });
@@ -201,6 +214,8 @@ const withProject = (fn) =>
       res.status(404);
       throw new Error("Project not found");
     }
+    // Ads belong to the Ads Editor; the clip routes must not pick, re-title or re-cut them.
+    if (isAdProject(project) && CLIP_ONLY.test(req.path)) throw new Error("This is an ad — edit it in the Ads Editor, not here.");
     return fn(req, project);
   });
 
@@ -609,6 +624,12 @@ app.get("/api/projects/:id/clips/:clipId/preview", async (req, res) => {
   const project = await loadProject(req.params.id);
   const clip = project?.clips?.find((c) => c.id === req.params.clipId);
   if (!clip) return res.status(404).type("text").send("Clip not found");
+  // Edited in the timeline editor? Then that edit is the clip — the same one the render uses (lib/pipeline.js
+  // prepareClip). Any unsaved design in the query rides along. (editor/, Timeline session.)
+  if (await readSavedDocument(project.id, clip.id).catch(() => null)) {
+    const query = req.originalUrl.includes("?") ? `?${req.originalUrl.split("?").slice(1).join("?")}` : "";
+    return res.redirect(307, `/api/editor/projects/${project.id}/clips/${clip.id}/preview${query}`);
+  }
   let design = {};
   try {
     design = JSON.parse(String(req.query.design || "{}"));
@@ -1050,6 +1071,14 @@ app.delete("/api/intentional/:id", handle((req) => removeQuestion(req.params.id)
 // ---------- who the clips are for (lib/audience.js) ----------
 const audienceUpload = multer({ dest: path.join(os.tmpdir(), "clipstudio-audience"), limits: { fileSize: 40 * 1024 * 1024 } });
 
+/** The colour grades uploaded to Assets, for the clip editor's grade switch. */
+app.get("/api/luts", handle(() => listLuts().then((l) => l.map(({ id, title }) => ({ id, title })))));
+
+// ---------- disk: what each video is holding, and clearing it (lib/tidy.js) ----------
+app.get("/api/disk", handle(() => diskReport()));
+/** level "scratch" clears render leftovers (always safe); "full" also drops the source once clips are rendered. */
+app.post("/api/projects/:id/tidy", withProject((req, project) => tidyProject(project.id, { level: req.body?.level === "full" ? "full" : "scratch" })));
+
 app.get("/api/audience", handle(() => getAudience()));
 app.delete("/api/audience", handle(() => clearAudience()));
 
@@ -1456,6 +1485,8 @@ app.get("/api/performance", handle(async () => {
 }));
 
 app.patch("/api/posts/:postId", handle((req) => updatePost(req.params.postId, req.body)));
+/** Post it now: the scheduled time moves to this moment and the publisher picks it up within seconds. */
+app.post("/api/posts/:postId/now", handle((req) => postNow(req.params.postId)));
 app.patch("/api/posts/:postId/targets/:accountId", handle((req) => setPublished(req.params.postId, req.params.accountId, Boolean(req.body.published))));
 app.delete("/api/posts/:postId", handle(async (req) => {
   await deletePost(req.params.postId);

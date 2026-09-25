@@ -79,11 +79,13 @@ export function createCanvas(root, store, ctx) {
     stopClock();
     store.setPlaying(false);
     loading.hidden = false;
+    frame.classList.add("reloading");
     layout();
     player.setAttribute("src", `${ctx.previewUrl}?rev=${store.doc.rev || 0}&v=${Date.now()}`);
   }
   player.addEventListener("ready", () => {
     loading.hidden = true;
+    frame.classList.remove("reloading");
     player.volume = Number(volume.value);
     player.playbackRate = Number($("[data-speed]", root).value);
     const r = resume;
@@ -93,7 +95,10 @@ export function createCanvas(root, store, ctx) {
     store.setTime(t, { from: "player" });
     if (r?.playing) play();
   });
-  player.addEventListener("error", () => (loading.hidden = true));
+  player.addEventListener("error", () => {
+    loading.hidden = true;
+    frame.classList.remove("reloading");
+  });
   player.addEventListener("ended", () => {
     stopClock();
     store.setPlaying(false);
@@ -110,7 +115,7 @@ export function createCanvas(root, store, ctx) {
   };
   function play() {
     if (!player.ready) return;
-    if (store.time >= M.duration(store.doc) - M.FRAME) seek(0);
+    if (store.time >= M.duration(store.doc) - M.FRAME) seek(0, { now: true });
     player.play();
     store.setPlaying(true);
     if (!raf) tick();
@@ -121,14 +126,34 @@ export function createCanvas(root, store, ctx) {
     store.setPlaying(false);
     store.setTime(player.currentTime, { from: "player" });
   }
-  function seek(t, { quiet = false } = {}) {
+  // The playhead follows the pointer exactly; the player catches up a few times a second, because asking it for a
+  // new frame on every pointer move is what makes scrubbing and trimming stutter.
+  const SEEK_EVERY = 70;
+  let seekTimer = 0;
+  let lastSeekAt = 0;
+  let pending = null;
+  function pushSeek() {
+    clearTimeout(seekTimer);
+    seekTimer = 0;
+    lastSeekAt = performance.now();
+    const { t, wasPlaying } = pending || {};
+    pending = null;
+    if (t == null || !player.ready) return;
+    player.seek(t);
+    // Seeking pauses the player; keep playing through a click on the timeline.
+    if (wasPlaying) player.play();
+  }
+  function seek(t, { quiet = false, now = false } = {}) {
     t = clamp(t, 0, M.duration(store.doc));
     const wasPlaying = store.playing && !quiet;
-    if (player.ready) player.seek(t);
     store.setTime(t);
-    // Seeking pauses the player; keep playing through a click on the timeline.
-    if (wasPlaying && player.ready) player.play();
-    else if (store.playing) pause();
+    if (store.playing && !wasPlaying) pause();
+    pending = { t, wasPlaying };
+    if (now) return pushSeek();
+    const wait = SEEK_EVERY - (performance.now() - lastSeekAt);
+    if (wait <= 0) return pushSeek();
+    // Always land on the last position asked for, however the moves were spaced.
+    if (!seekTimer) seekTimer = setTimeout(pushSeek, wait);
   }
   const toggle = () => (store.playing ? pause() : play());
 
@@ -147,7 +172,7 @@ export function createCanvas(root, store, ctx) {
   // Every save changes what plays, so the preview follows the saved document.
   store.on("saved", () => {
     clearTimeout(loadTimer);
-    loadTimer = setTimeout(() => (store.dragging ? null : load()), 120);
+    loadTimer = setTimeout(() => (store.dragging ? null : load()), 420);
   });
 
   // ---------- controls ----------
@@ -199,6 +224,7 @@ export function createCanvas(root, store, ctx) {
     fullscreen,
     destroy() {
       stopClock();
+      clearTimeout(seekTimer);
       sizer.disconnect();
       clearTimeout(loadTimer);
       player.pause?.();

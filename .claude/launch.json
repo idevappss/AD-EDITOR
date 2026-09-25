@@ -5,7 +5,7 @@
       "name": "clip-studio",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/server.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/server.js"
       ],
       "port": 5173
     },
@@ -13,7 +13,7 @@
       "name": "dope-edits",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/edits/server.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/edits/server.js"
       ],
       "port": 5190
     },
@@ -21,7 +21,7 @@
       "name": "music-channel",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/music/dev.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/music/dev.js"
       ],
       "port": 5191
     },
@@ -29,7 +29,7 @@
       "name": "integrations",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/integrations/dev.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/integrations/dev.js"
       ],
       "port": 5192
     },
@@ -37,7 +37,7 @@
       "name": "timeline-editor",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/editor/dev.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/editor/dev.js"
       ],
       "port": 5193
     },
@@ -45,9 +45,17 @@
       "name": "assets",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "/Users/wfp/Documents/CLAUDE/I CLIP YOU/resources/dev.js"
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/resources/dev.js"
       ],
       "port": 5194
+    },
+    {
+      "name": "memory",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/memory/dev.js"
+      ],
+      "port": 5197
     }
   ]
 }

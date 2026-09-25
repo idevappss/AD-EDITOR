@@ -1,0 +1,84 @@
+/* Memory tab (memory/, MEMORY session). Colors come from public/theme.css tokens only. */
+
+.mm-stats { display: flex; gap: 18px; color: var(--muted); font-size: 13px; }
+.mm-stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mm-tabs { margin: 0 0 24px; }
+.mm-lede { max-width: 720px; margin: 0 0 18px; font-size: 14px; line-height: 1.6; }
+
+.mm-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 860px; margin-bottom: 8px; }
+.mm-doc { max-width: 860px; color: var(--text-2); font-size: 14.5px; line-height: 1.65; }
+.mm-doc h2 { margin: 0 0 10px; color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.mm-doc h3 { margin: 30px 0 10px; color: var(--text); font-size: 17px; font-weight: 600; }
+.mm-doc h4, .mm-doc h5 { margin: 20px 0 8px; color: var(--text); font-size: 14.5px; font-weight: 600; }
+.mm-doc p { margin: 0 0 10px; }
+.mm-doc ul, .mm-doc ol { margin: 0 0 12px; padding-left: 22px; }
+.mm-doc li { margin: 4px 0; }
+.mm-doc b { color: var(--text); font-weight: 600; }
+.mm-doc code, .mm-lede code, .mm-api code { padding: 1px 6px; border-radius: 6px; background: var(--surface-2); font: 12.5px var(--mono); }
+.mm-doc blockquote { margin: 0 0 12px; padding: 8px 14px; border-left: 2px solid var(--line-3); color: var(--muted); }
+.mm-doc hr { margin: 24px 0; border: 0; border-top: 1px solid var(--line); }
+.mm-doc table { width: 100%; margin: 0 0 14px; border-collapse: collapse; font-size: 13.5px; }
+.mm-doc th, .mm-doc td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.mm-doc th { color: var(--muted); font-weight: 500; }
+.mm-doc a, .mm-lede a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-3); }
+
+.mm-edit textarea { width: 100%; min-height: 62vh; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font: 13px/1.6 var(--mono); outline: none; resize: vertical; }
+.mm-edit textarea:focus { border-color: var(--line-3); }
+.mm-edit-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.mm-edit-bar > span { flex: 1; }
+
+.mm-add { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.mm-drop { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 16px 18px; border: 1px dashed var(--line-2); border-radius: var(--radius-md); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.mm-drop:hover { border-color: var(--line-3); background: var(--surface-2); }
+.mm-drop.over { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
+.mm-drop b { color: var(--text); font-size: 14px; font-weight: 500; }
+.mm-drop-icon { display: inline-flex; margin-bottom: 6px; color: var(--muted); }
+
+.mm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 8px; }
+.mm-search { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 240px; max-width: 620px; height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--pill); background: var(--surface-2); color: var(--faint); }
+.mm-search:focus-within { border-color: var(--line-3); }
+.mm-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.mm-kinds { margin: 10px 0 12px; }
+
+.mm-list, .mm-hits { display: flex; flex-direction: column; gap: 6px; }
+.mm-row, .mm-hit { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.mm-row:hover, .mm-hit:hover { border-color: var(--line-3); background: var(--surface-2); }
+.mm-row-main { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.mm-row-main b { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.mm-hit { flex-direction: column; align-items: stretch; gap: 8px; }
+.mm-hit q { display: block; padding-left: 12px; border-left: 2px solid var(--line-2); color: var(--text-2); font-size: 13.5px; line-height: 1.55; quotes: none; }
+
+.mm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.mm-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease); }
+.mm-card:hover { border-color: var(--line-3); transform: translateY(-1px); }
+.mm-card b { color: var(--text); font-size: 14.5px; font-weight: 500; }
+
+.mm-brand { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.mm-panel { padding: 16px 18px; }
+.mm-panel h3 { margin: 0 0 12px; color: var(--text); font-size: 14px; font-weight: 600; }
+.mm-panel ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13.5px; }
+.mm-logos { display: flex; flex-wrap: wrap; gap: 8px; }
+.mm-logo { display: grid; place-items: center; width: 84px; height: 64px; padding: 8px; border-radius: 10px; background: var(--bg-deep); }
+.mm-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.mm-swatches { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); font-size: 13px; }
+.mm-swatch { display: flex; align-items: center; gap: 8px; }
+.mm-swatch i { width: 22px; height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--line-2); }
+
+.mm-api { width: 100%; max-width: 1000px; margin-bottom: 14px; border-collapse: collapse; font-size: 13.5px; }
+.mm-api td { padding: 10px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.mm-api td:first-child { width: 64px; }
+.mm-api a { color: var(--text); }
+
+.mm-modal { width: min(860px, 94vw); max-height: 88vh; overflow: auto; }
+.mm-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.mm-modal-head h2 { margin: 0 0 4px; color: var(--text); font-size: 20px; font-weight: 600; }
+.mm-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.mm-meta .field { min-width: 160px; }
+.mm-meta .field.grow, .mm-meta .field:first-child { flex: 1; }
+.mm-read { max-height: 52vh; overflow: auto; padding: 4px 4px 4px 0; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+.mm-read p { margin: 0 0 12px; }
+
+@media (max-width: 640px) {
+  .mm-stats { gap: 12px; font-size: 12px; }
+  .mm-api td:last-child { display: none; }
+}

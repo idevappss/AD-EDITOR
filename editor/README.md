@@ -21,7 +21,26 @@ Clip     { id, type, start, duration, link?, transform? }
 
 - **First open:** `seedDocument` builds the document from `planClip`. The kept pieces become linked video and voice clips. The re-timed words are grouped into caption clips with `groupCaptions`. The hook title becomes a text clip and the bed becomes a music clip. So a clip opens looking exactly like its current preview and render.
 - **Saving:** documents autosave to `data/editor/<projectId>/<clipId>.json` (`PUT …/document`, with a revision check). `DELETE …/document` goes back to the AI edit.
+- **Magnet (magnetic timeline):** on by default, remembered per browser, toggled with the toolbar button or `M`. While it is on, the picture chain plays back to back: deleting takes the time out, trimming an edge slides everything after it, and a dropped clip closes the hole it left. The same time comes out of (or goes into) every unlocked track, so captions and titles stay on their words. `model.js` does this with `gaps` / `weld` / `rippleTrim` / `insertRange`, all built on `removeRange`. Hold ⌥ while dragging to ignore snapping, and use "Ripple" or ⇧Del to force the other behavior.
 - **Media:** waveform peaks (`…/peaks`, 50 per second) and filmstrip frames (`…/thumbs/<sec>`) are cut with ffmpeg and cached under `data/editor/`.
+
+## Who shows the edited timeline
+
+Once a clip has a saved document, that document *is* the clip:
+
+- `/api/editor/…/preview` builds from it (and takes `?design=…&title=…&highlight=…` overrides on top, for the classic editor's live tweaks).
+- Renders use it too: `lib/pipeline.js` `prepareClip` calls `documentPlan` when `readSavedDocument` finds one.
+- `/api/projects/:id/clips/:clipId/preview` (the studio's own route, used by the classic editor) redirects to the editor preview when a document exists, so no screen shows the AI's cut for a clip the creator has edited.
+- A finished MP4 on disk is still whatever was last rendered — editing the timeline doesn't re-render it. The Ads tab tracks this with `renderedRev` and marks the video stale.
+
+## Staying smooth during a drag
+
+A drag has to hold 60fps while the document changes on every frame, so the timeline splits its work:
+
+- `perFrame` in `timeline.js` coalesces `pointermove` into one update per animation frame, and **flushes** the last one on release, so a drag always lands exactly where the pointer was let go.
+- `draw({ live: true })` (used for transient, mid-gesture changes) only moves and resizes clips. Filmstrips, waveforms, labels, the ruler and the toolbar are left alone; a trimmed head slides its filmstrip with a transform instead, and video clips render 1.5× the frames they need so lengthening shows picture, not a hole. The full pass runs once when the gesture ends.
+- `place()` skips style writes for clips that didn't move, and `will-change` is only set while dragging.
+- The player is seeked at most every 70ms with a trailing update (`canvas.js`), instead of once per pointer move, and preview reloads wait 420ms after the last save and dim the frame rather than flashing.
 
 ## Front end (`public/`, plain ES modules, no build)
 

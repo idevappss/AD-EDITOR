@@ -135,13 +135,32 @@ export async function mountEditor(root, { projectId, clipId }) {
           M.group(doc, id).forEach((m) => done.add(m.clip.id));
           made = made.concat(M.split(doc, id, t));
         }
+        if (store.magnetic) M.weld(doc);
         return made.length > 0;
       });
     },
     delete() {
       if (!store.selection.length) return;
+      // Magnetic: deleting takes the time out too, so nothing is left hanging over a hole.
+      if (store.magnetic) return actions.ripple();
       store.commit("delete", (doc) => M.remove(doc, store.selection));
       store.select([]);
+    },
+    /** Delete and leave the hole, whatever the magnet says. */
+    deleteKeepGap() {
+      if (!store.selection.length) return;
+      store.commit("delete", (doc) => M.remove(doc, store.selection));
+      store.select([]);
+    },
+    magnet() {
+      store.setMagnetic(!store.magnetic);
+      if (store.magnetic && M.gaps(store.doc).length) actions.closeGaps();
+      else toast(store.magnetic ? "Magnet on — clips snap together and close up behind an edit" : "Magnet off — clips stay where you put them");
+    },
+    closeGaps() {
+      if (!M.gaps(store.doc).length) return toast("No gaps to close");
+      store.commit("close gaps", (doc) => M.weld(doc));
+      toast("Gaps closed");
     },
     ripple() {
       if (!store.selection.length) return;
@@ -388,7 +407,7 @@ export async function mountEditor(root, { projectId, clipId }) {
     if (cmd && key === "v") return run(actions.paste);
     if (cmd && key === "a") return run(() => store.select(M.allClips(store.doc).filter(({ track }) => !track.locked).map(({ clip }) => clip.id)));
     if (cmd) return;
-    if (key === "backspace" || key === "delete") return run(e.shiftKey ? actions.ripple : actions.delete);
+    if (key === "backspace" || key === "delete") return run(e.shiftKey ? actions.deleteKeepGap : actions.delete);
     if (key === "arrowleft" || key === "arrowright") return run(() => canvas.seek(store.time + (key === "arrowleft" ? -1 : 1) * (e.shiftKey ? 1 : M.FRAME)));
     if (key === "home") return run(() => canvas.seek(0));
     if (key === "end") return run(() => canvas.seek(M.duration(store.doc)));
@@ -396,7 +415,7 @@ export async function mountEditor(root, { projectId, clipId }) {
     if (key === "=" || key === "+") return run(() => timeline.zoomBy(1.4));
     if (key === "-") return run(() => timeline.zoomBy(1 / 1.4));
     if (key === "z" && e.shiftKey) return run(timeline.fit);
-    if (key === "n") return run(timeline.toggleSnap);
+    if (key === "m") return run(actions.magnet);
     if (key === "f") return run(canvas.fullscreen);
     if (key === "?" || (key === "/" && e.shiftKey)) return run(openShortcuts);
   }
@@ -448,7 +467,8 @@ export async function mountEditor(root, { projectId, clipId }) {
       null,
       ["link", I.link, "Link / unlink", ""],
       null,
-      ["ripple", I.ripple, "Ripple delete", "⇧Del"],
+      ["ripple", I.ripple, "Delete and close the gap", ""],
+      ["deleteKeepGap", I.trash, "Delete, keep the gap", "⇧Del"],
       ["delete", I.trash, "Delete", "Del", false, "danger"],
     ];
     menu.innerHTML = items.map((it) => (it ? `<button data-menu="${it[0]}" class="${it[5] || ""}" ${it[4] ? "disabled" : ""}>${it[1](14)}<span>${it[2]}</span><kbd>${it[3]}</kbd></button>` : `<hr />`)).join("");
@@ -498,14 +518,15 @@ export async function mountEditor(root, { projectId, clipId }) {
       ["Redo", `${mod} ⇧ Z`],
       ["Split at playhead", `${mod} B`],
       ["Delete", "Del"],
-      ["Ripple delete", "⇧ Del"],
+      ["Delete and keep the gap", "⇧ Del"],
       ["Duplicate", `${mod} D`],
       ["Copy / paste", `${mod} C · ${mod} V`],
       ["Previous / next frame", "← →"],
       ["Jump 1 second", "⇧ ← →"],
       ["Zoom timeline", "− / =  ·  pinch"],
       ["Fit timeline", "⇧ Z"],
-      ["Snapping on / off", "N  ·  hold ⌥ while dragging"],
+      ["Magnet on / off", "M  ·  hold ⌥ while dragging"],
+      ["Close every gap", "—"],
       ["Full screen", "F"],
     ];
     modal(`<div class="vm-head"><h3>Keyboard shortcuts</h3><button class="ibtn" data-close>${I.close(16)}</button></div>

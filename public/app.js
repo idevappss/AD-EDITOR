@@ -176,6 +176,14 @@ async function route() {
     window.scrollTo(0, 0);
     return;
   }
+  // Memory: the company brain (memory/, owned by the Memory session).
+  if (pathPart.startsWith("/memory")) {
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "memory"));
+    const { mountMemory } = await import("/api/memory/ui/memory.js");
+    await mountMemory(app);
+    window.scrollTo(0, 0);
+    return;
+  }
   // Analytics: how posted clips and channels are doing (analytics/, owned by the Analytics session).
   if (pathPart.startsWith("/analytics")) {
     $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "analytics"));
@@ -189,6 +197,14 @@ async function route() {
     $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "assets"));
     const { mountAssets } = await import("/api/resources/ui/assets.js");
     await mountAssets(app);
+    window.scrollTo(0, 0);
+    return;
+  }
+  // Ads Editor: raw ad footage in, finished ad out (ads/, owned by the Ads Editor session).
+  if (pathPart.startsWith("/ads")) {
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "ads"));
+    const { mountAds } = await import("/api/ads/ui/ads.js");
+    await mountAds(app);
     window.scrollTo(0, 0);
     return;
   }
@@ -1471,6 +1487,7 @@ function renderReady(p) {
             ? `<button id="captions-redo" class="btn ghost" ${p.captions?.status === "running" ? "disabled" : ""}>${p.captions?.status === "running" ? "Improving captions…" : "Improve captions"}</button>`
             : ""
         }
+        <button id="tidy" class="btn ghost" title="Clear this video's render leftovers. Add the source and working copy too once its clips are done.">Free up space</button>
         <button id="retitle" class="btn ghost" title="Rewrite every clip's headline and posting copy from what the clip says, for practice owners. The cuts stay as they are.">Rewrite titles</button>
         <button id="repick" class="btn ghost" title="Pick this video's clips again with the latest engine, check each one makes sense, and render the ones that hold up. Clips you edited on the timeline stay." ${p.repick?.status === "picking" ? "disabled" : ""}>${p.repick?.status === "picking" ? "Re-picking…" : "Re-pick clips"}</button>
         <button id="render-all" class="btn primary">Render all</button>
@@ -2664,6 +2681,24 @@ function bindReady(p) {
     patchHead();
   };
 
+  $("#tidy").onclick = async (e) => {
+    const rendered = p.clips.some((c) => c.render?.status === "done");
+    const full = rendered && confirm("Also delete this video's source file and working copy?\n\nOK — clears everything (frees the most space; the finished clips, transcript and picks stay, but the video can't be re-clipped without uploading it again).\nCancel — clears only render leftovers, which rebuild themselves.");
+    const button = e.currentTarget;
+    button.disabled = true;
+    button.textContent = "Clearing…";
+    try {
+      const out = await api(`/api/projects/${p.id}/tidy`, { method: "POST", body: { level: full ? "full" : "scratch" } });
+      toast(`Freed ${(out.freed / 1e9).toFixed(2)} GB`);
+      state.project = await api(`/api/projects/${p.id}`);
+      renderProject();
+    } catch (err) {
+      toast(err.message);
+      button.disabled = false;
+      button.textContent = "Free up space";
+    }
+  };
+
   $("#retitle").onclick = async (e) => {
     const note = prompt("Anything the new titles should do? (optional)\n\ne.g. lead with the number, speak to chiropractors, name the mistake", "") ?? null;
     if (note === null) return;
@@ -2925,6 +2960,8 @@ function openEditor(clipId) {
               <label class="field"><span>Music bed</span><select data-select="musicBed"><option value="auto">Auto — instrumental from my sounds</option><option value="none">No music</option></select></label>
               ${range("musicLevel", "Music level", 0, 0.8, 0.01)}
             </div>
+            <label class="field"><span>Colour grade</span><select data-select="lut"><option value="none">Off — the footage as shot</option></select></label>
+            <div class="row2">${range("tracking", "Letter spacing", -5, 5, 0.5)}${range("shadow", "Drop shadow", 0, 1, 0.05)}</div>
             ${toggle("autoFrame", "Auto-frame — follow the speaker")}
             ${range("cropX", "Crop  ←  →", 0, 100, 1)}
             <div class="row2">${toggle("zoom", "Zoom punches")}${toggle("progress", "Progress bar")}</div>
@@ -2956,6 +2993,16 @@ function openEditor(clipId) {
     const options = $("#saved-title-list", modal);
     if (options) options.innerHTML = list.map((t) => `<option value="${esc(t.title)}"></option>`).join("");
   });
+  // The creator's colour grades, uploaded to Assets. Off unless this clip picks one.
+  api("/api/luts")
+    .then((luts) => {
+      const select = $('[data-select="lut"]', modal);
+      if (!select || !luts.length) return;
+      select.insertAdjacentHTML("beforeend", luts.map((l) => `<option value="${l.id}">${esc(l.title)}</option>`).join(""));
+      select.value = draft.design.lut || "none";
+    })
+    .catch(() => {});
+
   // Music beds: the creator's instrumental sounds first, then anything with words on it.
   api("/api/sounds")
     .then((tracks) => {
@@ -3665,22 +3712,277 @@ function reviewCard(item, i, selected = false) {
     </article>`;
 }
 
-function renderCalendar() {
-  const start = state.week;
-  const end = addDays(start, 6);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const today = new Date();
-  const account = (id) => state.accounts.find((a) => a.id === id);
-  const inWeek = state.posts.filter((p) => {
-    const d = new Date(p.scheduledAt);
-    return d >= start && d < addDays(start, 7);
+// ---------- calendar ----------
+
+const CAL_ROW_PX = 92; // height of one hour in the week grid
+const CAL_MIN_PX = CAL_ROW_PX / 60;
+const CAL_EVENT_PX = 98;
+const CAL_VIEWS = [["week", "Week"], ["month", "Month"], ["list", "List"]];
+const CAL_MENU_W = 190;
+const CAL_MORE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></svg>`;
+const CAL_SEARCH = svg(`<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.8-3.8"/>`, 14);
+
+const calAccount = (id) => state.accounts.find((a) => a.id === id);
+const calPlatform = (post) => PLATFORMS[calAccount(post.targets[0]?.accountId)?.platform] || { color: "var(--info)", label: "" };
+const calPages = (post) => post.targets.map((t) => calAccount(t.accountId)?.name).filter(Boolean).join(", ");
+const calThumb = (post) => `<span class="cal-thumb"><video src="/files/${post.projectId}/${post.file}#t=1" muted preload="metadata" tabindex="-1"></video></span>`;
+const calPill = (post) => `<span class="cal-pill st-${post.status}">${STATUS_LABEL[post.status]}</span>`;
+
+/** Posts left after the platform, page and search filters. */
+function calendarPosts() {
+  const query = (state.calQuery || "").trim().toLowerCase();
+  return state.posts.filter((p) => {
+    const matchesTarget = p.targets.some((t) => {
+      const a = calAccount(t.accountId);
+      return (state.calPlatform === "all" || a?.platform === state.calPlatform) && (state.calAccount === "all" || t.accountId === state.calAccount);
+    });
+    if (!matchesTarget) return false;
+    return !query || `${p.title} ${calPages(p)} ${p.caption || ""}`.toLowerCase().includes(query);
   });
-  const due = state.posts.filter((p) => p.targets.some((t) => t.status === "due" || t.status === "failed"));
+}
+
+/**
+ * Place a day's posts on the time grid. Posts close enough to overlap step to the right on top of
+ * each other, so the one underneath still reads.
+ */
+function calendarLayout(posts, startHour) {
+  const items = posts
+    .map((p) => {
+      const at = new Date(p.scheduledAt);
+      return { post: p, at, top: (at.getHours() * 60 + at.getMinutes() - startHour * 60) * CAL_MIN_PX };
+    })
+    .sort((a, b) => a.top - b.top);
+
+  let cluster = [];
+  let clusterEnd = -Infinity;
+  const close = () => {
+    const lanes = [];
+    for (const item of cluster) {
+      let lane = lanes.findIndex((bottom) => item.top >= bottom);
+      if (lane < 0) lane = lanes.length;
+      lanes[lane] = item.top + CAL_EVENT_PX;
+      item.lane = lane;
+    }
+    cluster = [];
+  };
+  for (const item of items) {
+    if (item.top >= clusterEnd) close();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.top + CAL_EVENT_PX);
+  }
+  close();
+  return items;
+}
+
+function calendarCard({ post, at, top, lane }) {
+  const step = Math.min(lane, 3) * 14;
+  return `
+    <article class="cal-event st-${post.status}" data-post="${post.id}" tabindex="0" title="${esc(post.title)} · ${STATUS_LABEL[post.status]}"
+      style="top:${Math.max(0, top)}px; height:${CAL_EVENT_PX}px; left:calc(${step}% + 3px); right:3px; z-index:${lane + 1}; --pc:${calPlatform(post).color}">
+      <span class="ce-head">${avatar(calAccount(post.targets[0]?.accountId), "sm")}<time>${timeLabel(at)}</time>
+        <button class="ce-more" data-menu="${post.id}" title="More">${CAL_MORE}</button></span>
+      <span class="ce-main">
+        ${calThumb(post)}
+        <span class="ce-text">
+          <span class="cal-title">${esc(post.title)}</span>
+          <span class="cal-page">${esc(calPages(post))}</span>
+          ${calPill(post)}
+        </span>
+      </span>
+    </article>`;
+}
+
+function calendarWeek(days, posts, now) {
+  const hours = posts.map((p) => new Date(p.scheduledAt).getHours());
+  const startHour = Math.max(0, Math.min(8, ...hours));
+  const endHour = Math.min(24, Math.max(22, ...hours.map((h) => h + 2)));
+  const gridPx = (endHour - startHour) * CAL_ROW_PX;
+  const hourLabel = (h) => `${((h + 11) % 12) + 1} ${h < 12 ? "AM" : "PM"}`;
+  const zone = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value || "";
+
+  return `
+    <div class="cal-scroll">
+      <div class="cal-grid" style="--row:${CAL_ROW_PX}px">
+        <div class="cal-head-cell cal-corner">${esc(zone)}</div>
+        ${days
+          .map(
+            (d) => `
+          <div class="cal-head-cell ${sameDay(d, now) ? "today" : ""}">
+            <div class="dow">${d.toLocaleDateString([], { weekday: "short" })}</div>
+            <div class="dnum">${d.getDate()}</div>
+          </div>`,
+          )
+          .join("")}
+        <div class="cal-gutter" style="height:${gridPx}px">
+          ${Array.from({ length: endHour - startHour }, (_, i) => `<span class="cal-hour" style="top:${i * CAL_ROW_PX}px">${hourLabel(startHour + i)}</span>`).join("")}
+        </div>
+        ${days
+          .map((d) => {
+            const dayPosts = posts.filter((p) => sameDay(new Date(p.scheduledAt), d));
+            const nowTop = (now.getHours() * 60 + now.getMinutes() - startHour * 60) * CAL_MIN_PX;
+            return `
+            <div class="cal-col ${sameDay(d, now) ? "today" : ""} ${d < startOfDay(now) ? "past" : ""}" style="height:${gridPx}px">
+              ${sameDay(d, now) && nowTop >= 0 && nowTop <= gridPx ? `<div class="cal-now" style="top:${nowTop}px"></div>` : ""}
+              ${calendarLayout(dayPosts, startHour).map(calendarCard).join("")}
+            </div>`;
+          })
+          .join("")}
+      </div>
+    </div>`;
+}
+
+function calendarMonth(month, posts, now) {
+  const first = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));
+  const weeks = Array.from({ length: 6 }, (_, w) => Array.from({ length: 7 }, (_, d) => addDays(first, w * 7 + d)));
+  const dow = weeks[0].map((d) => `<div class="mon-dow">${d.toLocaleDateString([], { weekday: "short" })}</div>`).join("");
+  return `
+    <div class="mon-grid">
+      ${dow}
+      ${weeks
+        .flat()
+        .map((d) => {
+          const dayPosts = posts.filter((p) => sameDay(new Date(p.scheduledAt), d)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+          const shown = dayPosts.slice(0, 3);
+          const rest = dayPosts.length - shown.length;
+          return `
+          <div class="mon-cell ${sameDay(d, now) ? "today" : ""} ${d.getMonth() === month.getMonth() ? "" : "out"}">
+            <div class="mon-date">${d.getDate()}</div>
+            ${shown
+              .map(
+                (p) => `
+              <button class="mon-chip st-${p.status}" data-post="${p.id}" style="--pc:${calPlatform(p).color}" title="${esc(p.title)} · ${STATUS_LABEL[p.status]}">
+                <i></i><time>${timeLabel(new Date(p.scheduledAt))}</time><span>${esc(p.title)}</span>
+              </button>`,
+              )
+              .join("")}
+            ${rest > 0 ? `<button class="mon-more" data-day="${d.toISOString()}">+${rest} more</button>` : ""}
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+}
+
+function calendarList(posts, now) {
+  if (!posts.length) return `<div class="empty">Nothing scheduled here yet.</div>`;
+  const byDay = new Map();
+  for (const p of [...posts].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))) {
+    const key = startOfDay(new Date(p.scheduledAt)).toISOString();
+    byDay.set(key, [...(byDay.get(key) || []), p]);
+  }
+  return `<div class="cal-list">
+    ${[...byDay]
+      .map(([key, list]) => {
+        const d = new Date(key);
+        return `
+        <section class="list-day ${sameDay(d, now) ? "today" : ""}" id="day-${key.slice(0, 10)}">
+          <h4>${d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}${sameDay(d, now) ? " · Today" : ""}<span class="muted">${plural(list.length, "post")}</span></h4>
+          ${list
+            .map(
+              (p) => `
+            <article class="list-row st-${p.status}" data-post="${p.id}" tabindex="0" style="--pc:${calPlatform(p).color}">
+              <time>${timeLabel(new Date(p.scheduledAt))}</time>
+              ${calThumb(p)}
+              <div class="list-text"><div class="cal-title">${esc(p.title)}</div><div class="cal-page">${esc(calPages(p))}</div></div>
+              <span class="avatars">${p.targets.map((t) => avatar(calAccount(t.accountId), "sm")).join("")}</span>
+              ${calPill(p)}
+              <button class="ce-more" data-menu="${p.id}" title="More">${CAL_MORE}</button>
+            </article>`,
+            )
+            .join("")}
+        </section>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+/** The ⋯ menu on a post: everything you can do without opening it. */
+function openCardMenu(anchor, post) {
+  $(".cal-menu")?.remove();
+  const due = post.targets.filter((t) => t.status === "due" || t.status === "failed");
+  const menu = document.createElement("div");
+  menu.className = "cal-menu";
+  menu.innerHTML = `
+    <button data-act="open">Open</button>
+    <button data-act="caption">Copy caption</button>
+    <a href="/files/${post.projectId}/${post.file}" download>Download clip</a>
+    ${due.length ? `<button data-act="posted">Mark posted</button>` : ""}
+    <button data-act="remove" class="danger">Remove from calendar</button>`;
+  document.body.append(menu);
+  const box = anchor.getBoundingClientRect();
+  menu.style.top = `${Math.min(window.innerHeight - menu.offsetHeight - 12, box.bottom + 6)}px`;
+  menu.style.left = `${Math.max(12, Math.min(window.innerWidth - CAL_MENU_W - 12, box.right - CAL_MENU_W))}px`;
+
+  const close = () => {
+    menu.remove();
+    document.removeEventListener("mousedown", onOutside, true);
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onOutside = (e) => !menu.contains(e.target) && close();
+  const onKey = (e) => e.key === "Escape" && close();
+  document.addEventListener("mousedown", onOutside, true);
+  window.addEventListener("keydown", onKey, true);
+
+  menu.onclick = async (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return close(); // the download link handles itself
+    close();
+    if (act === "open") return openComposer({ item: post, post });
+    if (act === "caption") return copy(post.caption || "");
+    try {
+      if (act === "posted") {
+        for (const t of due) await api(`/api/posts/${post.id}/targets/${t.accountId}`, { method: "PATCH", body: { published: true } });
+        toast("Marked as posted");
+      }
+      if (act === "remove") {
+        if (!confirm(`Remove "${post.title}" from the calendar? The clip itself stays in your library.`)) return;
+        await api(`/api/posts/${post.id}`, { method: "DELETE" });
+        toast("Removed from the calendar");
+      }
+      refreshScheduler();
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+}
+
+function renderCalendar() {
+  const now = new Date();
+  // The scheduler re-renders on a timer, so hold on to where the user was.
+  const scroller0 = $(".cal-scroll") || $(".cal-list");
+  const keptScroll = scroller0 && state.calScroll?.view === state.calView ? scroller0.scrollTop : null;
+  const keptFocus = document.activeElement?.id === "cal-search" ? document.activeElement.selectionStart : null;
+  const view = CAL_VIEWS.some(([id]) => id === state.calView) ? state.calView : (state.calView = "week");
+  const start = state.week;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const monthAnchor = view === "month" ? addDays(start, 3) : start;
+
+  const platformsUsed = [...new Set(state.accounts.map((a) => a.platform))].filter((p) => PLATFORMS[p]);
+  if (state.calPlatform !== "all" && !platformsUsed.includes(state.calPlatform)) state.calPlatform = "all";
+  if (state.calAccount !== "all" && !state.accounts.some((a) => a.id === state.calAccount)) state.calAccount = "all";
+
+  const shown = calendarPosts();
+  const inRange =
+    view === "month"
+      ? shown.filter((p) => new Date(p.scheduledAt).getMonth() === monthAnchor.getMonth() && new Date(p.scheduledAt).getFullYear() === monthAnchor.getFullYear())
+      : view === "list"
+        ? [...shown].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)) // everything, past included
+        : shown.filter((p) => {
+            const d = new Date(p.scheduledAt);
+            return d >= start && d < addDays(start, 7);
+          });
+  const due = shown.filter((p) => p.targets.some((t) => t.status === "due" || t.status === "failed"));
+  const count = (status) => inRange.filter((p) => p.status === status).length;
+
   const month = (d) => d.toLocaleDateString([], { month: "short" });
+  const end = addDays(start, 6);
   const range =
-    start.getMonth() === end.getMonth()
-      ? `${month(start)} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`
-      : `${month(start)} ${start.getDate()} – ${month(end)} ${end.getDate()}, ${end.getFullYear()}`;
+    view === "month"
+      ? monthAnchor.toLocaleDateString([], { month: "long", year: "numeric" })
+      : view === "list"
+        ? "Everything scheduled"
+        : start.getMonth() === end.getMonth()
+          ? `${month(start)} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`
+          : `${month(start)} ${start.getDate()} – ${month(end)} ${end.getDate()}, ${end.getFullYear()}`;
 
   const body = $("#sched");
   body.innerHTML = `
@@ -3700,7 +4002,7 @@ function renderCalendar() {
                     ${p.targets
                       .filter((t) => t.status === "due" || t.status === "failed")
                       .map(
-                        (t) => `<span class="due-target">${avatar(account(t.accountId), "sm")} ${esc(account(t.accountId)?.name || "")}
+                        (t) => `<span class="due-target">${avatar(calAccount(t.accountId), "sm")} ${esc(calAccount(t.accountId)?.name || "")}
                           <button class="link-btn" data-mark="${p.id}:${t.accountId}">Mark posted</button></span>`,
                       )
                       .join("")}
@@ -3716,36 +4018,50 @@ function renderCalendar() {
           </div>`
         : ""
     }
-    <div class="toolbar">
-      <div class="week-nav">
-        <button class="icon-btn" data-week="-1" title="Previous week">${ICON.left}</button>
-        <button class="icon-btn" data-week="1" title="Next week">${ICON.right}</button>
+
+    <div class="cal-bar">
+      <div class="cal-when">
+        <button class="btn ghost sm" data-week="0">Today</button>
+        <button class="icon-btn" data-week="-1" title="Previous">${ICON.left}</button>
+        <button class="icon-btn" data-week="1" title="Next">${ICON.right}</button>
         <h3>${range}</h3>
       </div>
-      <div class="row">
-        <span class="muted">${plural(inWeek.length, "post")} this week</span>
-        <button class="btn" data-week="0">Today</button>
+      <div class="cal-when">
+        <div class="segmented" id="cal-view">
+          ${CAL_VIEWS.map(([id, label]) => `<button data-view="${id}" class="${view === id ? "on" : ""}">${label}</button>`).join("")}
+        </div>
+        <button class="btn primary sm" data-schedule-new>${ICON.plus} Schedule post</button>
       </div>
     </div>
-    <div class="week">
-      ${days
-        .map((d) => {
-          const posts = inWeek.filter((p) => sameDay(new Date(p.scheduledAt), d));
-          return `
-            <div class="day ${sameDay(d, today) ? "today" : ""} ${d < startOfDay(today) ? "past" : ""}">
-              <div class="day-head"><span>${d.toLocaleDateString([], { weekday: "short" })}</span><b>${d.getDate()}</b></div>
-              ${posts
-                .map(
-                  (p) => `
-                <button class="post-chip st-${p.status}" data-post="${p.id}" title="${STATUS_LABEL[p.status]}">
-                  <span class="pc-top"><time>${timeLabel(new Date(p.scheduledAt))}</time><span class="avatars">${p.targets.map((t) => avatar(account(t.accountId), "sm")).join("")}</span></span>
-                  <span class="pc-title">${esc(p.title)}</span>
-                </button>`,
-                )
-                .join("")}
-            </div>`;
-        })
-        .join("")}
+
+    <div class="cal-filters">
+      <select class="cal-pages" id="cal-account" aria-label="Filter by page">
+        <option value="all">All pages (${state.accounts.length})</option>
+        ${state.accounts.map((a) => `<option value="${a.id}" ${state.calAccount === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+      </select>
+      <div class="chip-row" id="cal-platform">
+        <button data-platform="all" class="fchip ${state.calPlatform === "all" ? "on" : ""}">All</button>
+        ${platformsUsed
+          .map(
+            (id) =>
+              `<button data-platform="${id}" class="fchip ${state.calPlatform === id ? "on" : ""}"><i style="background:${PLATFORMS[id].color}"></i>${PLATFORMS[id].label}</button>`,
+          )
+          .join("")}
+      </div>
+      <label class="cal-search">${CAL_SEARCH}<input id="cal-search" type="search" placeholder="Search scheduled content…" value="${esc(state.calQuery || "")}" /></label>
+      <span class="cal-counts">${[
+        [count("scheduled"), "scheduled"],
+        [count("published"), "posted"],
+        [due.length, "due"],
+        [count("failed"), "failed"],
+      ]
+        .filter(([n]) => n)
+        .map(([n, label]) => `<span class="cal-count ${label}">${n} ${label}</span>`)
+        .join("")}</span>
+    </div>
+
+    <div class="card cal-card">
+      ${view === "week" ? calendarWeek(days, inRange, now) : view === "month" ? calendarMonth(monthAnchor, inRange, now) : calendarList(inRange, now)}
     </div>
     ${state.posts.length ? "" : `<p class="muted note">Nothing scheduled yet. Pick a clip in <a class="link-btn" href="#/scheduler?tab=review">Review clips</a>.</p>`}`;
 
@@ -3753,14 +4069,55 @@ function renderCalendar() {
     (b) =>
       (b.onclick = () => {
         const n = Number(b.dataset.week);
-        state.week = n === 0 ? startOfWeek(new Date()) : addDays(state.week, 7 * n);
+        const jump = view === "month" ? 28 : 7;
+        state.week = n === 0 ? startOfWeek(new Date()) : addDays(state.week, jump * n);
         renderCalendar();
       }),
   );
-  $$("[data-post]", body).forEach((b) => {
-    const post = state.posts.find((p) => p.id === b.dataset.post);
-    b.onclick = () => openComposer({ item: post, post });
+  $("#cal-view", body).onclick = (e) => {
+    const b = e.target.closest("[data-view]");
+    if (!b) return;
+    state.calView = b.dataset.view;
+    renderCalendar();
+  };
+  $("#cal-platform", body).onclick = (e) => {
+    const b = e.target.closest("[data-platform]");
+    if (!b) return;
+    state.calPlatform = b.dataset.platform;
+    renderCalendar();
+  };
+  $("#cal-account", body).onchange = (e) => {
+    state.calAccount = e.target.value;
+    renderCalendar();
+  };
+  $("#cal-search", body).oninput = debounceSearch(() => {
+    state.calQuery = $("#cal-search", body).value;
+    renderCalendar();
   });
+  $("[data-schedule-new]", body).onclick = () => (location.hash = "#/scheduler?tab=review");
+  $$("[data-day]", body).forEach(
+    (b) =>
+      (b.onclick = () => {
+        state.calView = "list";
+        renderCalendar();
+        $(`#day-${b.dataset.day.slice(0, 10)}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }),
+  );
+  $$("[data-post]", body).forEach((card) => {
+    const post = state.posts.find((p) => p.id === card.dataset.post);
+    card.onclick = (e) => {
+      if (e.target.closest("[data-menu]")) return;
+      openComposer({ item: post, post });
+    };
+    card.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openComposer({ item: post, post }));
+  });
+  $$("[data-menu]", body).forEach(
+    (b) =>
+      (b.onclick = (e) => {
+        e.stopPropagation();
+        openCardMenu(b, state.posts.find((p) => p.id === b.dataset.menu));
+      }),
+  );
   $$("[data-mark]", body).forEach(
     (b) =>
       (b.onclick = async () => {
@@ -3775,7 +4132,28 @@ function renderCalendar() {
       }),
   );
   $$("[data-copy-caption]", body).forEach((b) => (b.onclick = () => copy(state.posts.find((p) => p.id === b.dataset.copyCaption)?.caption || "")));
+
+  // Stay where the user was; a fresh view opens on the working day rather than at midnight.
+  const scroller = $(".cal-scroll", body) || $(".cal-list", body);
+  if (scroller && view === "list") {
+    const today = $(`#day-${startOfDay(now).toISOString().slice(0, 10)}`, body) || [...$$(".list-day", body)].find((el) => el.id.slice(4) >= startOfDay(now).toISOString().slice(0, 10));
+    scroller.scrollTop = keptScroll ?? (today ? today.offsetTop - scroller.offsetTop - 8 : 0);
+  } else if (scroller) {
+    scroller.scrollTop = keptScroll ?? Math.max(0, (Math.min(now.getHours(), 9) - 8) * CAL_ROW_PX - 12);
+  }
+  state.calScroll = { view };
+  if (keptFocus !== null) {
+    const input = $("#cal-search", body);
+    input.focus();
+    input.setSelectionRange(keptFocus, keptFocus);
+  }
 }
+
+let searchTimer;
+const debounceSearch = (fn) => () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(fn, 200);
+};
 
 const IG_CONNECT_URL = "/api/integrations/instagram/connect";
 
@@ -3988,6 +4366,7 @@ async function openComposer({ item, post = null }) {
           ${post ? `<button type="button" class="btn danger" data-delete>${ICON.trash} Delete</button>` : ""}
           <span class="spacer"></span>
           <button type="button" class="btn ghost" data-close>Cancel</button>
+          <button type="button" class="btn" data-now>Post now</button>
           <button class="btn primary" data-submit>${post ? "Save changes" : "Schedule post"}</button>
         </div>
       </form>
@@ -4095,6 +4474,26 @@ async function openComposer({ item, post = null }) {
       toast(err.message);
     }
   });
+
+  // Post now: save it (or create it) with this moment as its time, and let the publisher take it from there.
+  $("[data-now]", form).onclick = async (e) => {
+    if (!selected.size) return toast("Pick an account first");
+    const button = e.currentTarget;
+    button.disabled = true;
+    button.textContent = "Posting…";
+    try {
+      const body = { accountIds: [...selected], scheduledAt: new Date().toISOString(), caption: textarea.value };
+      const saved = post ? await api(`/api/posts/${post.id}`, { method: "PATCH", body }) : await api("/api/posts", { method: "POST", body: { ...body, projectId: item.projectId, clipId: item.clipId } });
+      await api(`/api/posts/${saved.id || post.id}/now`, { method: "POST", body: {} });
+      closeModal();
+      toast("Posting now — watch it on the calendar");
+      refreshScheduler();
+    } catch (err) {
+      toast(err.message);
+      button.disabled = false;
+      button.textContent = "Post now";
+    }
+  };
 
   form.onsubmit = async (e) => {
     e.preventDefault();

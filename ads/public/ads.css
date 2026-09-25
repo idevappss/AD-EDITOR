@@ -1,0 +1,83 @@
+/* Ads Editor tab (ads/, Ads Editor session). Colors come from public/theme.css tokens only. */
+
+.ad-page { position: relative; }
+.ad-drop { gap: 10px; min-height: 200px; padding: 24px; color: var(--text-2); text-align: center; }
+.ad-drop svg { color: var(--muted); }
+.ad-drop b { color: var(--text); font-size: 15px; font-weight: 600; }
+.ad-drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ad-up { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(420px, 90%); }
+.ad-bar { width: 100%; height: 6px; overflow: hidden; border-radius: var(--pill); background: var(--surface-3); }
+.ad-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--slow) var(--ease); }
+
+.ad-batch { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; padding: 16px 18px; }
+.ad-h { margin: 36px 0 14px; font-size: 16px; }
+.ad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.ad-grid .empty { grid-column: 1 / -1; }
+.ad-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--highlight); color: inherit; transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease); }
+.ad-card:hover { border-color: var(--line-3); transform: translateY(-2px); }
+.ad-thumb { aspect-ratio: 16 / 10; overflow: hidden; background: var(--bg-deep); }
+.ad-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ad-card-body { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; border-top: 1px solid var(--line); }
+.ad-card-body b { overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ad-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ad-del { margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--faint); cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
+.ad-del:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+
+.ad-head h1 { outline: none; border-radius: 8px; }
+.ad-head h1:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.ad-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); gap: 28px; align-items: start; }
+.ad-stage { position: sticky; top: 20px; display: flex; justify-content: center; align-items: center; height: min(78vh, 900px); border-radius: var(--radius); background: var(--bg-deep); border: 1px solid var(--line); overflow: hidden; }
+.ad-stage hyperframes-player { display: block; height: 100%; max-width: 100%; aspect-ratio: var(--ar); }
+.ad-stage-empty { position: relative; height: 100%; aspect-ratio: var(--ar); max-width: 100%; display: grid; place-items: center; }
+.ad-stage-empty img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.28; filter: blur(2px); }
+.ad-stage-msg { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 80%; color: var(--text-2); font-size: 14px; line-height: 1.5; text-align: center; }
+.ad-spin { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: ad-spin 0.9s linear infinite; }
+@keyframes ad-spin { to { transform: rotate(360deg); } }
+
+.ad-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ad-summary { padding: 16px 18px; }
+.ad-summary p { margin: 0 0 8px; color: var(--text-2); font-size: 13.5px; line-height: 1.55; }
+.ad-stats { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ad-stats span { display: flex; flex-direction: column; color: var(--faint); font-size: 11.5px; }
+.ad-stats b { color: var(--text); font-size: 15px; font-weight: 600; }
+.ad-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ad-actions .btn { flex: 1; }
+.ad-transcript { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ad-transcript .muted { margin-right: 4px; }
+.ad-render { display: flex; flex: 1; align-items: center; gap: 10px; }
+.ad-render .ad-bar { flex: 1; }
+.ad-warn, .ad-error { color: var(--danger); }
+.ad-brief { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+.ad-ideas { display: flex; flex-wrap: wrap; gap: 6px; }
+.ad-ideas .chip { cursor: pointer; }
+.ad-logo-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ad-logo { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 84px; padding: 8px 6px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.ad-logo img { width: 56px; height: 40px; object-fit: contain; }
+.ad-logo input { width: 100%; height: 22px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11px; text-align: center; outline: none; }
+.ad-logo input:focus { background: var(--surface-3); color: var(--text); }
+.ad-logo-x { position: absolute; top: 2px; right: 4px; border: 0; background: none; color: var(--faint); font-size: 14px; cursor: pointer; }
+.ad-logo-x:hover { color: var(--danger); }
+.ad-logo.add { justify-content: center; min-height: 72px; border-style: dashed; color: var(--muted); cursor: pointer; }
+.ad-logo.add span { font-size: 20px; line-height: 1; }
+.ad-logo.add small { font-size: 11px; }
+.ad-logo.add:hover { border-color: var(--line-3); color: var(--text); }
+.ad-opts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: end; }
+.ad-toggles { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.ad-brief .btn.lg { width: 100%; }
+
+@media (max-width: 900px) {
+  .ad-work { grid-template-columns: 1fr; }
+  .ad-stage { position: relative; top: 0; height: 60vh; }
+  .ad-opts { grid-template-columns: 1fr; }
+}
+.ad-slide-tile { width: 132px; }
+.ad-slide-tile img { width: 116px; height: 66px; object-fit: cover; border-radius: 6px; }
+.ad-thumb { position: relative; }
+.ad-bulk { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 34px; color: var(--muted); }
+.ad-pick { display: grid; place-items: center; width: 24px; height: 24px; border: 1.5px solid color-mix(in srgb, var(--text) 55%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--bg-deep) 55%, transparent); color: transparent; cursor: pointer; transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), opacity var(--fast) var(--ease); }
+.ad-pick svg { width: 14px; height: 14px; }
+.ad-thumb .ad-pick { position: absolute; top: 10px; left: 10px; z-index: 1; opacity: 0; }
+.ad-card:hover .ad-pick, .ad-grid:has(.picked) .ad-pick, .ad-pick[aria-checked="true"] { opacity: 1; }
+.ad-pick[aria-checked="true"] { border-color: var(--accent); background: var(--accent); color: var(--bg-deep); }
+.ad-card.picked { border-color: var(--accent); }
+.ad-bulk .btn.ad-danger:not(:disabled):hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }

@@ -22,6 +22,14 @@ export class PublishError extends Error {
 
 const cleanHandle = (handle) => String(handle || "").trim().replace(/^@+/, "").toLowerCase();
 
+/** Where Instagram can fetch a rendered clip from, when this app has a public address (PUBLIC_BASE_URL). */
+export function publicVideoUrl(videoPath, base = process.env.PUBLIC_BASE_URL) {
+  if (!base) return null;
+  const parts = String(videoPath).split("/projects/")[1];
+  if (!parts) return null;
+  return `${String(base).replace(/\/+$/, "")}/files/${parts.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 /** The connected Instagram login behind a HBA Content Backend account: by igUserId, else by matching handle. */
 export function findConnection(connections, account) {
   if (!account) return null;
@@ -154,10 +162,31 @@ export function createPublisher({
       retryable: null,
     });
 
-    const container = await ig.createReelContainer(conn, { caption: info.caption, shareToFeed: true, thumbOffsetMs: info.thumbOffsetMs });
-    job = await saveJob(key, { step: "uploading", containerId: container.id });
-    await ig.uploadVideo(conn, { uri: container.uri, filePath: snapshot });
-    job = await saveJob(key, { step: "processing" });
+    // Instagram either fetches the file from a public URL (when this app is reachable from the internet) or takes
+    // the bytes directly. Some apps only get the first; we try bytes first and fall back to the URL.
+    const videoUrl = publicVideoUrl(info.videoPath);
+    let container;
+    try {
+      container = await ig.createReelContainer(conn, { caption: info.caption, shareToFeed: true, thumbOffsetMs: info.thumbOffsetMs });
+    } catch (err) {
+      if (!/video_url is required/i.test(err.message) || !videoUrl) {
+        if (/video_url is required/i.test(err.message)) {
+          throw await failJob(
+            key,
+            "Instagram wants to fetch the video from a public link, and this app isn't reachable from the internet yet. Set PUBLIC_BASE_URL to a public address for it (a tunnel works) and try again.",
+            { code: "needs_public_url", retryable: true },
+          );
+        }
+        throw err;
+      }
+      log.info(`[instagram] ${key}: this app can't use resumable upload, handing Instagram the link instead`);
+      container = await ig.createReelContainer(conn, { caption: info.caption, shareToFeed: true, thumbOffsetMs: info.thumbOffsetMs, videoUrl });
+    }
+    job = await saveJob(key, { step: container.hosted ? "processing" : "uploading", containerId: container.id });
+    if (!container.hosted) {
+      await ig.uploadVideo(conn, { uri: container.uri, filePath: snapshot });
+      job = await saveJob(key, { step: "processing" });
+    }
     return finish(key, conn, job);
   }
 

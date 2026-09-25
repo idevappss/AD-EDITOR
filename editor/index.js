@@ -19,6 +19,7 @@ import { acceptsFile, addAsset, assetFilePath, assetUrl, assetsDir, getAsset, li
 import { injectLayers } from "./director/layers.js";
 import { attachMattes, ensureMattes, matteUrl, mattesDir } from "./director/matte.js";
 import { applyCues, planDirector } from "./director/plan.js";
+import { applyAdLayers } from "../ads/layers.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ID = /^[\w-]{1,60}$/;
@@ -172,9 +173,19 @@ export function createEditor({ loadProject = loadFromStore } = {}) {
       const project = await loadProject(req.params.projectId);
       const clip = project ? findClip(project, req.params.clipId) : null;
       if (!clip) return res.status(404).type("text").send("Clip not found");
-      const doc = await openDoc(project, clip);
+      const saved = await openDoc(project, clip);
+      // Unsaved tweaks from the classic editor ride along in the query, on top of the timeline the creator saved.
+      let override = {};
+      try {
+        override = JSON.parse(String(req.query.design || "{}"));
+      } catch {
+        // a broken design in the URL just means "use the saved one"
+      }
+      const doc = Object.keys(override).length ? { ...saved, aspect: ASPECTS[override.aspect] ? override.aspect : saved.aspect, design: { ...saved.design, ...override } } : saved;
       const videoSrc = videoUrl(project);
       const inputs = await compositionInputs(doc, { project, clip, videoSrc });
+      if (typeof req.query.title === "string" && req.query.title.trim()) inputs.clip = { ...inputs.clip, title: req.query.title.trim().slice(0, 120) };
+      if (typeof req.query.highlight === "string") inputs.clip = { ...inputs.clip, highlight: req.query.highlight.slice(0, 40) };
       const focus = await clipFocus(project, clip, { compute: false }).catch(() => null);
       let { html } = buildCompositionHtml({
         clip: inputs.clip,
@@ -191,6 +202,8 @@ export function createEditor({ loadProject = loadFromStore } = {}) {
       });
       if (inputs.muteVoice) html = html.replace(/<audio id="pa\d+"[^>]*><\/audio>/g, "");
       html = injectLayers(html, doc, await layerResolver(project, doc, { preview: true }));
+      // Ads Editor: motion graphics, sound effects and the ad's grade (ads/layers.js). No-op for other clips.
+      html = await applyAdLayers(html, doc, { projectId: project.id, preview: true });
       res.type("html").set("Cache-Control", "no-store").send(html);
     } catch (err) {
       console.error("Editor preview:", err);

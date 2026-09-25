@@ -78,7 +78,7 @@ export async function seedDocument(project, clip) {
   };
 }
 
-const KINDS = { text: "text", caption: "caption", video: "video", audio: "audio", overlay: "overlay", emphasis: "emphasis" };
+const KINDS = { text: "text", caption: "caption", video: "video", audio: "audio", overlay: "overlay", emphasis: "emphasis", graphic: "graphic", sfx: "sfx", camera: "camera", voicefx: "voicefx" };
 const LAYOUTS = ["full", "split", "pip", "card"];
 const str = (v, max) => String(v ?? "").slice(0, max);
 const id = (v) => str(v, 40).replace(/[^\w-]/g, "") || null;
@@ -101,6 +101,14 @@ export function normalizeDocument(input, { project, clip }) {
       if (c.link) base.link = id(c.link);
       if (kind === "text") return [{ ...base, content: str(c.content, 400), highlight: str(c.highlight, 60), style: c.style && typeof c.style === "object" ? JSON.parse(JSON.stringify(c.style).slice(0, 4000)) : {} }];
       if (kind === "emphasis") return [{ ...base, text: str(c.text, 80), why: str(c.why, 300) }];
+      // Ads Editor tracks (ads/graphics.js draws them): motion graphics and sound effects.
+      if (kind === "graphic") {
+        const items = (Array.isArray(c.items) ? c.items : []).slice(0, 5).map((x) => str(x, 60)).filter((x) => x.trim());
+        return [{ ...base, look: id(c.look) || "headline", text: str(c.text, 120), sub: str(c.sub, 120), highlight: str(c.highlight, 60), items, icon: id(c.icon) || "", ...(c.logo ? { logo: id(c.logo) } : {}), ...(Array.isArray(c.logos) ? { logos: c.logos.slice(0, 3).map(id).filter(Boolean) } : {}), ...(c.strike ? { strike: true } : {}), ...(c.slide ? { slide: id(c.slide) } : {}), ...(c.face && typeof c.face === "object" ? { face: { top: num(c.face.top, 0, 1), bottom: num(c.face.bottom, 0, 1) } } : {}), position: ["top", "center", "bottom"].includes(c.position) ? c.position : "top" }];
+      }
+      if (kind === "camera") return [{ ...base, move: ["punch", "push", "pull", "shake", "zoom-blur", "whip", "flash", "bw", "rgb"].includes(c.move) ? c.move : "punch" }];
+      if (kind === "voicefx") return [{ ...base, effect: ["underwater", "muffle", "phone"].includes(c.effect) ? c.effect : "underwater" }];
+      if (kind === "sfx") return id(c.sfx) ? [{ ...base, sfx: id(c.sfx), volume: num(c.volume, 0, 2, 0.5), ...(Number(c.offset) > 0 ? { offset: num(c.offset, 0, 60) } : {}) }] : [];
       if (kind === "overlay") {
         const source = ["slide", "screen", "broll"].includes(c.source) ? c.source : "slide";
         const o = { ...base, source, asset: id(c.asset), layout: LAYOUTS.includes(c.layout) ? c.layout : source === "broll" ? "full" : "split", side: c.side === "left" ? "left" : "right", name: str(c.name, 120), why: str(c.why, 300) };
@@ -114,6 +122,8 @@ export function normalizeDocument(input, { project, clip }) {
         return [{ ...base, words }];
       }
       const media = { ...base, sourceStart: num(c.sourceStart, 0, sourceDuration), speed: num(c.speed, 0.25, 4, 1), volume: num(c.volume, 0, 2, 1) };
+      // Where the face sits in this piece (Ads Editor): zooms are capped so it stays in frame.
+      if (kind === "video" && c.face && typeof c.face === "object") media.face = { top: num(c.face.top, 0, 1), bottom: num(c.face.bottom, 0, 1) };
       media.sourceEnd = num(c.sourceEnd, media.sourceStart, sourceDuration, media.sourceStart + media.duration * media.speed);
       if (c.sound) Object.assign(media, { sound: id(c.sound), name: str(c.name, 120), loop: c.loop !== false });
       return [media];

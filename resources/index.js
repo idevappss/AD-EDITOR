@@ -21,6 +21,7 @@ export const TYPES = [
   { id: "color", label: "Colors" },
   { id: "title-animation", label: "Title animations" },
   { id: "transition", label: "Transitions" },
+  { id: "lut", label: "Color grades (LUTs)" },
   { id: "guideline", label: "Brand guidelines" },
   { id: "sop", label: "SOPs" },
   { id: "example", label: "Examples" },
@@ -74,6 +75,8 @@ export function guessType(name, mime = "") {
   if ([".ttf", ".otf", ".woff", ".woff2"].includes(ext) || mime.startsWith("font/")) return "font";
   if ([".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ai", ".eps"].includes(ext) || mime.startsWith("image/")) return "logo";
   if ([".ase", ".aco"].includes(ext)) return "color";
+  // A .cube/.3dl lookup table is the creator's colour grade; renders can apply it (lib/luts.js).
+  if ([".cube", ".3dl", ".look"].includes(ext)) return "lut";
   if (/brand|guideline|style ?guide/i.test(name)) return "guideline";
   if (/\bsop\b|process|checklist|workflow/i.test(name)) return "sop";
   if (mime.startsWith("video/") || [".mp4", ".mov", ".webm"].includes(ext)) return "example";

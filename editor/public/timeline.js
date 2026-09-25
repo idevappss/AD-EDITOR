@@ -7,8 +7,10 @@ import { $, $$, I, clamp, esc, mod, r3, tc, tip } from "./ui.js";
 const HEAD = 176; // track header column
 const PAD = 18; // space before 0s
 const ZOOM = { min: 4, max: 600 };
-const HEIGHT = { text: 36, caption: 36, video: 62, audio: 46, overlay: 48, emphasis: 36 };
-const KIND_ICON = { text: I.text, caption: I.captions, video: I.video, audio: I.audio, overlay: I.media, emphasis: I.sparkle };
+const HEIGHT = { text: 36, caption: 36, video: 62, audio: 46, overlay: 48, emphasis: 36, graphic: 40, sfx: 32, camera: 28, voicefx: 28 };
+const KIND_ICON = { text: I.text, caption: I.captions, video: I.video, audio: I.audio, overlay: I.media, emphasis: I.sparkle, graphic: I.elements, sfx: I.effects, camera: I.zoomIn, voicefx: I.audio };
+// Ads Editor tracks (ads/graphics.js).
+const LOOK_LABEL = { headline: "Headline", stat: "Number", list: "Checklist", "lower-third": "Name bar", callout: "Badge", cta: "CTA", compare: "Before/after", icon: "Icon", logo: "Logo", proof: "Testimonial", check: "Big check", slide: "Slide" };
 const LAYOUT_LABEL = { full: "Full screen", split: "Side by side", pip: "Corner", card: "Card" };
 
 export function createTimeline(root, store, ctx) {
@@ -19,8 +21,8 @@ export function createTimeline(root, store, ctx) {
         <button class="tbtn" data-act="redo" title="${tip("Redo", `${mod}⇧Z`)}">${I.redo(16)}</button>
         <span class="tl-sep"></span>
         <button class="tbtn lbl" data-act="split" title="${tip("Split at playhead", `${mod}B`)}">${I.split(16)}<span>Split</span></button>
-        <button class="tbtn lbl" data-act="ripple" title="${tip("Delete and close the gap", "⇧Del")}">${I.ripple(16)}<span>Ripple</span></button>
-        <button class="tbtn lbl" data-act="delete" title="${tip("Delete", "Del")}">${I.trash(16)}<span>Delete</span></button>
+        <button class="tbtn lbl" data-act="ripple" title="${tip("Delete and close the gap")}">${I.ripple(16)}<span>Ripple</span></button>
+        <button class="tbtn lbl" data-act="delete" title="${tip("Delete — closes the gap while the magnet is on", "Del")}">${I.trash(16)}<span>Delete</span></button>
         <button class="tbtn" data-act="duplicate" title="${tip("Duplicate", `${mod}D`)}">${I.duplicate(16)}</button>
         <span class="tl-sep"></span>
         <button class="tbtn" data-act="link" title="${tip("Link or unlink picture and sound")}">${I.link(16)}</button>
@@ -28,7 +30,8 @@ export function createTimeline(root, store, ctx) {
         <button class="tbtn lbl" disabled title="Auto captions · coming with AI tools">${I.sparkle(16)}<span>Auto captions</span></button>
       </div>
       <div class="tl-zoom">
-        <button class="tbtn on" data-act="snap" title="${tip("Snapping", "N")}">${I.magnet(16)}</button>
+        <button class="tbtn lbl" data-act="magnet" title="${tip("Magnetic timeline — clips snap together and close up behind an edit", "M")}">${I.magnet(16)}<span>Magnet</span></button>
+        <button class="tbtn" data-act="close-gaps" title="${tip("Close every gap now")}">${I.ripple(16)}</button>
         <span class="tl-sep"></span>
         <button class="tbtn" data-act="zoom-out" title="${tip("Zoom out", "-")}">${I.zoomOut(16)}</button>
         <input type="range" class="tl-zoom-range" min="0" max="1000" step="1" aria-label="Timeline zoom" />
@@ -55,7 +58,7 @@ export function createTimeline(root, store, ctx) {
 
   let zoom = 40; // px per second
   let fitted = false;
-  let snapping = true;
+  const magnetic = () => store.magnetic;
   const rows = new Map(); // track id → { el, lane, clips: Map(id → { el, key }) }
 
   const x = (t) => PAD + t * zoom; // inside a lane
@@ -128,6 +131,10 @@ export function createTimeline(root, store, ctx) {
     if (clip.type === "caption") return `${base}|${clip.words.map((w) => w.text).join(" ")}`;
     if (clip.type === "overlay") return `${base}|${clip.asset}|${clip.page}|${clip.layout}|${clip.side}|${ctx.uploads?.get(clip.asset)?.status || ""}`;
     if (clip.type === "emphasis") return `${base}|${clip.text}|${ctx.mattes?.[clip.id]?.state || ""}`;
+    if (clip.type === "graphic") return `${base}|${clip.look}|${clip.text}|${clip.sub}|${(clip.items || []).join("/")}`;
+    if (clip.type === "sfx") return `${base}|${clip.sfx}|${clip.volume}`;
+    if (clip.type === "camera") return `${base}|${clip.move}`;
+    if (clip.type === "voicefx") return `${base}|${clip.effect}`;
     return `${base}|${clip.content}`;
   }
 
@@ -135,7 +142,8 @@ export function createTimeline(root, store, ctx) {
     const handles = `<i class="tl-h l" data-edge="start"></i><i class="tl-h r" data-edge="end"></i>`;
     if (clip.type === "video") {
       const tileW = 62 * ctx.sourceAspect;
-      const count = Math.min(240, Math.max(1, Math.ceil(width / tileW)));
+      // Half a clip's worth of spare frames: trimming wider reveals real picture instead of a hole.
+      const count = Math.min(240, Math.max(1, Math.ceil((width * 1.5) / tileW)));
       const tiles = Array.from({ length: count }, (_, i) => {
         const sec = Math.floor(clip.sourceStart + ((i + 0.5) * tileW * (clip.speed || 1)) / zoom);
         return `<img src="${ctx.thumbUrl(sec)}" loading="lazy" decoding="async" draggable="false" alt="" style="width:${tileW}px" />`;
@@ -159,6 +167,10 @@ export function createTimeline(root, store, ctx) {
       const dot = m === "done" ? "" : m === "queued" || m === "running" ? `<i class="tl-dot busy" title="Cutting out the speaker so the words sit behind them"></i>` : m === "error" ? `<i class="tl-dot err" title="Couldn't cut out the speaker here, so the words sit in front"></i>` : "";
       return `<span class="tl-label">${I.sparkle(12)}${esc(clip.text || "Big caption")}${dot}</span>${handles}`;
     }
+    if (clip.type === "graphic") return `<span class="tl-label"><b>${esc(LOOK_LABEL[clip.look] || "Graphic")}</b>${esc(clip.text || "")}</span>${handles}`;
+    if (clip.type === "camera") return `<span class="tl-label">${(clip.move === "pull" ? I.zoomOut : I.zoomIn)(11)}${{ punch: "Punch in", push: "Push in", pull: "Pull out", shake: "Shake", "zoom-blur": "Zoom blur", whip: "Whip", flash: "Flash", bw: "B&W", rgb: "RGB split" }[clip.move] || "Zoom"}</span>${handles}`;
+    if (clip.type === "voicefx") return `<span class="tl-label">${I.audio(11)}${{ underwater: "Underwater", muffle: "Muffled", phone: "Phone" }[clip.effect] || "Voice FX"}</span>${handles}`;
+    if (clip.type === "sfx") return `<span class="tl-label">${I.effects(11)}${esc(String(clip.sfx || "").replace(/-/g, " "))}</span>${handles}`;
     return `<span class="tl-label">${I.text(12)}${esc(clip.content || "Text")}</span>${handles}`;
   }
 
@@ -188,12 +200,21 @@ export function createTimeline(root, store, ctx) {
     }
   }
 
-  function draw() {
+  let canvasWidth = 0;
+  /**
+   * @param live  mid-gesture: move and resize what's already there, and leave the filmstrips, waveforms and
+   *              labels alone (rebuilding them 60 times a second is what made dragging stutter). Anything that
+   *              went out of date is rebuilt by the full pass when the gesture ends.
+   */
+  function draw({ live = false } = {}) {
     const doc = store.doc;
     const total = M.duration(doc);
     const width = Math.max(scroll.clientWidth - HEAD, x(total) + Math.max(240, (scroll.clientWidth - HEAD) * 0.4));
-    canvas.style.width = `${HEAD + width}px`;
-    drawRuler(width);
+    if (width !== canvasWidth) {
+      canvasWidth = width;
+      canvas.style.width = `${HEAD + width}px`;
+      if (!live) drawRuler(width); // the ruler catches up when the gesture ends
+    } else if (!live) drawRuler(width);
     const selected = new Set(store.selection);
 
     const seen = new Set();
@@ -209,6 +230,14 @@ export function createTimeline(root, store, ctx) {
         rows.set(track.id, row);
       }
       if (rowsEl.children[order] !== row.el) rowsEl.insertBefore(row.el, rowsEl.children[order] || null);
+      if (live) {
+        // Only the clips can move mid-gesture; the track and its header can't.
+        for (const clip of track.clips) {
+          const item = row.clips.get(clip.id);
+          if (item) place(item, track, clip, selected);
+        }
+        return;
+      }
       row.el.dataset.kind = track.kind;
       row.el.dataset.role = track.role || "";
       row.el.style.height = `${HEIGHT[track.kind]}px`;
@@ -220,9 +249,9 @@ export function createTimeline(root, store, ctx) {
         row.headKey = headKey;
       }
 
-      const live = new Set();
+      const present = new Set();
       for (const clip of track.clips) {
-        live.add(clip.id);
+        present.add(clip.id);
         let item = row.clips.get(clip.id);
         if (!item) {
           const el = document.createElement("div");
@@ -232,22 +261,20 @@ export function createTimeline(root, store, ctx) {
           item = { el, key: "" };
           row.clips.set(clip.id, item);
         }
-        const left = x(clip.start);
-        const w = Math.max(2, clip.duration * zoom);
-        item.el.style.transform = `translateX(${left}px)`;
-        item.el.style.width = `${w}px`;
-        item.el.classList.toggle("sel", selected.has(clip.id));
-        item.el.classList.toggle("narrow", w < 26);
+        const w = place(item, track, clip, selected);
         const key = clipKey(track, clip);
         if (item.key !== key) {
           item.el.innerHTML = clipInner(track, clip, w);
           item.key = key;
+          item.film = $(".tl-film", item.el);
+          item.sourceStart = clip.sourceStart ?? 0;
+          if (item.film) item.film.style.transform = "";
           const wave = $(".tl-wave", item.el);
           if (wave) drawWave(wave, clip, w, HEIGHT[track.kind] - 8);
         }
       }
       for (const [id, item] of row.clips) {
-        if (!live.has(id)) {
+        if (!present.has(id)) {
           item.el.remove();
           row.clips.delete(id);
         }
@@ -260,7 +287,30 @@ export function createTimeline(root, store, ctx) {
       }
     }
     movePlayhead();
-    syncButtons();
+    if (!live) syncButtons();
+  }
+
+  /** Put one clip where it belongs. Returns its width in pixels. */
+  function place(item, track, clip, selected) {
+    const w = Math.max(2, clip.duration * zoom);
+    const left = x(clip.start);
+    // Most clips don't move on a given frame; skipping their styles keeps the browser out of needless layout work.
+    if (item.left !== left) {
+      item.el.style.transform = `translateX(${left}px)`;
+      item.left = left;
+    }
+    if (item.width !== w) {
+      item.el.style.width = `${w}px`;
+      item.width = w;
+    }
+    item.el.classList.toggle("sel", selected.has(clip.id));
+    item.el.classList.toggle("narrow", w < 26);
+    // Trimming the head scrolls through the source, so slide the frames already on screen to match.
+    if (item.film && item.sourceStart != null) {
+      const shift = ((clip.sourceStart ?? 0) - item.sourceStart) / (clip.speed || 1);
+      item.film.style.transform = shift ? `translateX(${-shift * zoom}px)` : "";
+    }
+    return w;
   }
 
   function markSelection() {
@@ -271,6 +321,8 @@ export function createTimeline(root, store, ctx) {
 
   function syncButtons() {
     const has = store.selection.length > 0;
+    $('[data-act="magnet"]', root).classList.toggle("on", store.magnetic);
+    $('[data-act="close-gaps"]', root).disabled = !M.gaps(store.doc).length;
     const act = (name) => $(`[data-act="${name}"]`, root);
     act("undo").disabled = !store.canUndo();
     act("redo").disabled = !store.canRedo();
@@ -297,27 +349,60 @@ export function createTimeline(root, store, ctx) {
 
   // ---------- gestures ----------
   const within = () => 8 / zoom;
+
+  /** Run `fn` at most once per frame with the newest pointer event; pointermove can fire far more often. */
+  function perFrame(fn) {
+    let event = null;
+    let frame = 0;
+    const run = () => {
+      frame = 0;
+      const ev = event;
+      event = null;
+      if (ev) fn(ev);
+    };
+    const queue = (ev) => {
+      event = ev;
+      if (!frame) frame = requestAnimationFrame(run);
+    };
+    queue.flush = () => {
+      if (frame) cancelAnimationFrame(frame);
+      run();
+    };
+    queue.cancel = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      event = null;
+    };
+    return queue;
+  }
+
+  // The lane's position only changes when the page scrolls or resizes, so read it once per gesture.
+  let laneLeft = null;
+  const laneX = (clientX) => Math.max(0, (clientX - (laneLeft ?? rowsEl.getBoundingClientRect().left) - HEAD - PAD) / zoom);
   const showSnap = (t) => {
     snapline.hidden = t === null;
     if (t !== null) snapline.style.transform = `translateX(${HEAD + x(t)}px)`;
   };
 
   function scrub(e) {
+    laneLeft = rowsEl.getBoundingClientRect().left;
+    const points = M.snapPoints(store.doc);
+    const limit = M.duration(store.doc);
     const seek = (ev) => {
-      let t = timeAt(ev.clientX);
-      if (snapping && !ev.altKey) {
-        const snapped = M.snapTo(M.snapPoints(store.doc), t, within());
-        t = snapped.t;
-      }
-      ctx.seek(Math.min(t, M.duration(store.doc)));
+      let t = laneX(ev.clientX);
+      if (magnetic() && !ev.altKey) t = M.snapTo(points, t, within()).t;
+      ctx.seek(Math.min(t, limit));
     };
+    const onMove = perFrame(seek);
     seek(e);
     const up = () => {
-      window.removeEventListener("pointermove", seek);
+      onMove.flush(); // the last move before letting go still counts
+      window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", up);
       document.body.classList.remove("tl-grabbing");
+      laneLeft = null;
     };
-    window.addEventListener("pointermove", seek);
+    window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", up);
     document.body.classList.add("tl-grabbing");
   }
@@ -331,8 +416,19 @@ export function createTimeline(root, store, ctx) {
     const exclude = new Set(M.group(store.doc, id).map((m) => m.clip.id));
     const points = M.snapPoints(store.doc, { exclude, playhead: store.time });
     let active = false;
+    laneLeft = rowsEl.getBoundingClientRect().left;
+    // Showing the frame under a trim means seeking the player: worth doing, but not on every single move.
+    let lastSeek = 0;
+    const previewEdge = (force = false) => {
+      if (!edge) return;
+      const now = performance.now();
+      if (!force && now - lastSeek < 110) return;
+      lastSeek = now;
+      const live = M.locate(store.doc, id)?.clip;
+      if (live) ctx.seek(edge === "start" ? live.start : Math.max(0, M.end(live) - M.FRAME), { quiet: true });
+    };
 
-    const moveTo = (ev) => {
+    const apply = (ev) => {
       const dt = (ev.clientX - startX) / zoom;
       if (!active) {
         if (Math.abs(ev.clientX - startX) < 3) return;
@@ -340,16 +436,16 @@ export function createTimeline(root, store, ctx) {
         store.gesture.begin();
         document.body.classList.add(edge ? "tl-trimming" : "tl-grabbing");
       }
-      const snap = snapping && !ev.altKey;
+      const snap = magnetic() && !ev.altKey;
       let at = null;
       if (edge === "start") {
         let t = origin.start + dt;
         if (snap) ({ t, at } = M.snapTo(points, t, within()));
-        store.gesture.update((doc) => M.trimStart(doc, id, t));
+        store.gesture.update((doc) => (magnetic() && M.isPicture(hit.track) ? M.rippleTrim(doc, id, "start", t, { sourceDuration: ctx.sourceDuration }) : M.trimStart(doc, id, t)));
       } else if (edge === "end") {
         let t = origin.end + dt;
         if (snap) ({ t, at } = M.snapTo(points, t, within()));
-        store.gesture.update((doc) => M.trimEnd(doc, id, t, { sourceDuration: ctx.sourceDuration }));
+        store.gesture.update((doc) => (magnetic() && M.isPicture(hit.track) ? M.rippleTrim(doc, id, "end", t, { sourceDuration: ctx.sourceDuration }) : M.trimEnd(doc, id, t, { sourceDuration: ctx.sourceDuration })));
       } else {
         let t = origin.start + dt;
         if (snap) {
@@ -361,21 +457,33 @@ export function createTimeline(root, store, ctx) {
             at = b.at;
           }
         }
-        store.gesture.update((doc) => M.move(doc, id, t));
+        store.gesture.update((doc) => {
+          if (!M.move(doc, id, t)) return false;
+          if (magnetic()) M.weld(doc);
+        });
       }
       showSnap(at);
-      if (edge) ctx.seek(edge === "start" ? M.locate(store.doc, id)?.clip.start ?? store.time : Math.max(0, (M.locate(store.doc, id) ? M.end(M.locate(store.doc, id).clip) : store.time) - M.FRAME), { quiet: true });
+      previewEdge();
     };
+    const moveTo = perFrame(apply);
     const up = () => {
+      moveTo.flush(); // land on the last position the pointer was at, not the last frame that happened to run
       window.removeEventListener("pointermove", moveTo);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("keydown", esc_);
       document.body.classList.remove("tl-grabbing", "tl-trimming");
       showSnap(null);
-      if (active) store.gesture.end(edge ? "trim" : "move");
+      laneLeft = null;
+      if (active) {
+        store.gesture.end(edge ? "trim" : "move");
+        // Back to a full pass: filmstrips, waveforms and labels catch up with where things ended.
+        draw();
+        previewEdge(true);
+      }
     };
     const esc_ = (ev) => {
       if (ev.key !== "Escape") return;
+      moveTo.cancel();
       store.gesture.cancel();
       active = false;
       up();
@@ -432,19 +540,17 @@ export function createTimeline(root, store, ctx) {
     if (act === "zoom-in") return setZoom(zoom * 1.5);
     if (act === "zoom-out") return setZoom(zoom / 1.5);
     if (act === "fit") return fit();
-    if (act === "snap") {
-      snapping = !snapping;
-      btn.classList.toggle("on", snapping);
-      return;
-    }
+    if (act === "magnet") return ctx.actions.magnet();
+    if (act === "close-gaps") return ctx.actions.closeGaps();
     ctx.actions[act]?.();
   });
 
   // ---------- wiring ----------
   const offs = [
-    store.on("doc", draw),
+    store.on("doc", (change) => draw({ live: Boolean(change?.transient) })),
     store.on("selection", markSelection),
     store.on("history", syncButtons),
+    store.on("magnet", syncButtons),
     store.on("time", () => {
       movePlayhead();
       follow();
@@ -463,7 +569,7 @@ export function createTimeline(root, store, ctx) {
     fit,
     timeAt,
     zoomBy: (f) => setZoom(zoom * f),
-    toggleSnap: () => $('[data-act="snap"]', root).click(),
+    toggleMagnet: () => ctx.actions.magnet(),
     destroy() {
       offs.forEach((off) => off());
       resize.disconnect();

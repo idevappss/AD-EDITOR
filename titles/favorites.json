@@ -522,6 +522,12 @@
       "kind": "hook",
       "source": "app",
       "addedAt": "2026-09-15T19:14:36.011Z"
+    },
+    {
+      "title": "Simplify Before You Multiply",
+      "kind": "hook",
+      "source": "app",
+      "addedAt": "2026-09-24T20:33:47.322Z"
     }
   ],
   "avoid": [
@@ -530,6 +536,12 @@
       "kind": "hook",
       "source": "app",
       "addedAt": "2026-09-22T18:37:20.707Z"
+    },
+    {
+      "title": "Pick A Processor That Fights Your Disputes",
+      "kind": "hook",
+      "source": "app",
+      "addedAt": "2026-09-23T22:19:50.306Z"
     }
   ]
 }

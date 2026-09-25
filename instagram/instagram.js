@@ -96,20 +96,24 @@ export function createInstagramClient({ appId, appSecret, redirectUri, apiVersio
       return { quotaUsage: row.quota_usage ?? 0, quotaTotal: row.config?.quota_total ?? null };
     },
 
-    /** Creates a Reels container that expects the video bytes via uploadVideo(). */
-    async createReelContainer(account, { caption, shareToFeed = true, thumbOffsetMs }) {
+    /**
+     * Creates a Reels container. With `videoUrl`, Instagram fetches the file itself — the only way that works for
+     * accounts whose app can't use resumable upload (it answers "The parameter video_url is required"). Without one,
+     * the container expects the bytes via uploadVideo().
+     */
+    async createReelContainer(account, { caption, shareToFeed = true, thumbOffsetMs, videoUrl = null }) {
       const data = await call(`${base}/${igId(account)}/media`, {
         method: "POST",
         params: {
           media_type: "REELS",
-          upload_type: "resumable",
+          ...(videoUrl ? { video_url: videoUrl } : { upload_type: "resumable" }),
           caption,
           share_to_feed: shareToFeed,
           thumb_offset: Number.isFinite(thumbOffsetMs) ? Math.max(0, Math.round(thumbOffsetMs)) : undefined,
           access_token: account.accessToken,
         },
       });
-      return { id: data.id, uri: data.uri || `https://rupload.facebook.com/ig-api-upload/${apiVersion}/${data.id}` };
+      return { id: data.id, hosted: Boolean(videoUrl), uri: data.uri || `https://rupload.facebook.com/ig-api-upload/${apiVersion}/${data.id}` };
     },
 
     async uploadVideo(account, { uri, filePath }) {

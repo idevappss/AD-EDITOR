@@ -4,6 +4,15 @@ import { locate } from "./model.js";
 
 const HISTORY = 200;
 
+/** Magnetic timeline: on by default, remembered between sessions. */
+function readMagnetic() {
+  try {
+    return localStorage.getItem("editor.magnetic") !== "off";
+  } catch {
+    return true;
+  }
+}
+
 export function createStore({ document, save }) {
   const listeners = new Map();
   const on = (event, fn) => {
@@ -23,6 +32,7 @@ export function createStore({ document, save }) {
     gesture: null,
     // The saved revision lives outside the document, so undoing to an older snapshot never rewinds it.
     rev: document.rev || 0,
+    magnetic: readMagnetic(),
     save: { state: "saved", at: document.savedAt ? new Date(document.savedAt) : null, error: null },
   };
 
@@ -175,6 +185,17 @@ export function createStore({ document, save }) {
     },
     get dragging() {
       return Boolean(s.gesture);
+    },
+    /** Clips close up behind an edit and snap to each other while dragging. */
+    get magnetic() {
+      return s.magnetic;
+    },
+    setMagnetic(on) {
+      s.magnetic = Boolean(on);
+      try {
+        localStorage.setItem("editor.magnetic", s.magnetic ? "on" : "off");
+      } catch {}
+      emit("magnet", s.magnetic);
     },
     canUndo: () => s.past.length > 0,
     canRedo: () => s.future.length > 0,

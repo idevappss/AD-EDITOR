@@ -119,6 +119,49 @@ export function createInspector(root, store, ctx) {
       ${timing(clip)}`;
   }
 
+  // Ads Editor clips (ads/graphics.js draws them in the preview and render).
+  const LOOKS = { headline: "Kinetic headline", stat: "Big number", list: "Checklist", "lower-third": "Name bar", callout: "Badge", cta: "Call to action", compare: "Before / after", icon: "Icon card", logo: "Logo", proof: "Testimonial", check: "Big check", slide: "Slide" };
+  const SOUNDS = { whoosh: "Whoosh", "whoosh-short": "Quick whoosh", "whoosh-cinematic": "Cinematic whoosh", pop: "Pop", riser: "Riser", "impact-bass-1": "Bass hit", "impact-bass-2": "Deep impact", "glitch-1": "Glitch", "glitch-2": "Glitch 2" };
+  const options = (map, value) => Object.entries(map).map(([k, label]) => `<option value="${k}" ${k === value ? "selected" : ""}>${label}</option>`).join("");
+
+  function graphicPanel(clip) {
+    const list = clip.look === "list" || clip.look === "compare";
+    const hint = { proof: "Main = the member's line, second line = their name.", logo: "Main = optional wordmark under the logo. The logo image comes from the Ads Editor.", stat: "Starts with the number, e.g. $100k/mo. It counts up.", compare: "Main = left label, second line = right label, items = before / after.", "lower-third": "Main = name, second line = role.", cta: "Main = the button, second line = the reason above it." }[clip.look] || "2–6 words land best.";
+    return `
+      <div class="in-title"><span class="in-kind k-graphic">${I.elements(14)}Motion graphic</span></div>
+      ${section("Look", `<div class="in-row2">${field("Type", `<select class="in-input in-select" data-gfx="look">${options(LOOKS, clip.look)}</select>`)}${field("Position", `<select class="in-input in-select" data-gfx="position">${options({ top: "Top", center: "Center", bottom: "Bottom" }, clip.position)}</select>`)}</div>`)}
+      ${section("Words", `
+        <div class="in-stack"><input class="in-input" data-gfx="text" maxlength="120" value="${esc(clip.text)}" placeholder="Main words" /></div>
+        <div class="in-stack"><input class="in-input" data-gfx="sub" maxlength="120" value="${esc(clip.sub)}" placeholder="Second line (optional)" /></div>
+        ${["headline", "icon"].includes(clip.look) ? `<div class="in-stack"><input class="in-input" data-gfx="highlight" maxlength="60" value="${esc(clip.highlight)}" placeholder="Word to highlight" /></div>` : ""}
+        ${list ? `<div class="in-area"><textarea data-gfx="items" rows="4" placeholder="One item per line">${esc((clip.items || []).join("\n"))}</textarea></div>` : ""}
+        <p class="in-note">${hint}</p>`)}
+      ${timing(clip)}`;
+  }
+
+  function cameraPanel(clip) {
+    return `
+      <div class="in-title"><span class="in-kind k-camera">${I.zoomIn(14)}Camera move</span></div>
+      ${section("Move", `${field("Move", `<select class="in-input in-select" data-gfx="move">${options({ punch: "Punch in (hard jump tight)", push: "Push in (slow zoom)", pull: "Pull out (jump wide)", shake: "Shake (impact)", "zoom-blur": "Zoom blur punch", whip: "Whip pan (on a cut)", flash: "Flash", bw: "Black & white beat", rgb: "RGB split glitch" }, clip.move)}</select>`)}<p class="in-note">Holds for the clip's length, then the shot goes back to its normal rhythm.</p>`)}
+      ${timing(clip)}`;
+  }
+
+  function voicefxPanel(clip) {
+    return `
+      <div class="in-title"><span class="in-kind k-camera">${I.audio(14)}Voice effect</span></div>
+      ${section("Effect", `${field("Effect", `<select class="in-input in-select" data-gfx="effect">${options({ underwater: "Underwater", muffle: "Muffled", phone: "Phone call" }, clip.effect)}</select>`)}<p class="in-note">The voice plays through this effect for the clip's length.</p>`)}
+      ${timing(clip)}`;
+  }
+
+  function sfxPanel(clip) {
+    const vol = clip.volume ?? 0.5;
+    return `
+      <div class="in-title"><span class="in-kind k-sfx">${I.effects(14)}Sound effect</span></div>
+      ${section("Sound", `${field("Sound", `<select class="in-input in-select" data-gfx="sfx">${options(SOUNDS, clip.sfx)}</select>`)}`)}
+      ${section("Volume", `<div class="in-slider"><input type="range" min="0" max="1.5" step="0.05" value="${vol}" data-sfxvol /><b data-sfxvol-out>${Math.round(vol * 100)}%</b></div>`)}
+      ${timing(clip)}`;
+  }
+
   function draw(force = false) {
     const sel = store.selection;
     const key = `${sel.join()}|${tab}`;
@@ -137,6 +180,10 @@ export function createInspector(root, store, ctx) {
     else if (hit.clip.type === "video") root.innerHTML = videoPanel(hit.clip);
     else if (hit.clip.type === "overlay") root.innerHTML = overlayPanel(hit.clip);
     else if (hit.clip.type === "emphasis") root.innerHTML = emphasisPanel(hit.clip);
+    else if (hit.clip.type === "graphic") root.innerHTML = graphicPanel(hit.clip);
+    else if (hit.clip.type === "sfx") root.innerHTML = sfxPanel(hit.clip);
+    else if (hit.clip.type === "camera") root.innerHTML = cameraPanel(hit.clip);
+    else if (hit.clip.type === "voicefx") root.innerHTML = voicefxPanel(hit.clip);
     else root.innerHTML = audioPanel(hit.clip, hit.track);
   }
 
@@ -146,13 +193,21 @@ export function createInspector(root, store, ctx) {
     const hit = M.locate(store.doc, id);
     if (!hit || !Number.isFinite(value)) return;
     const { clip } = hit;
+    let doc_ = store.doc;
+    const magnetic = store.magnetic && M.isPicture(hit.track);
+    const trim = (edge, to) => (magnetic ? M.rippleTrim(doc_, id, edge, to, { sourceDuration: ctx.sourceDuration }) : edge === "start" ? M.trimStart(doc_, id, to) : M.trimEnd(doc_, id, to, { sourceDuration: ctx.sourceDuration }));
     store.commit(key === "start" ? "move" : "trim", (doc) => {
-      if (key === "start") return M.move(doc, id, value);
-      if (key === "end") return M.trimEnd(doc, id, value, { sourceDuration: ctx.sourceDuration });
-      if (key === "duration") return M.trimEnd(doc, id, clip.start + value, { sourceDuration: ctx.sourceDuration });
+      doc_ = doc;
+      if (key === "start") {
+        if (!M.move(doc, id, value)) return false;
+        if (magnetic) M.weld(doc);
+        return true;
+      }
+      if (key === "end") return trim("end", value);
+      if (key === "duration") return trim("end", clip.start + value);
       if (key === "sourceStart" && clip.type === "overlay") return void (M.locate(doc, id).clip.sourceStart = r3(Math.max(0, value)));
-      if (key === "sourceStart") return M.trimStart(doc, id, clip.start + (value - clip.sourceStart) / (clip.speed || 1));
-      if (key === "sourceEnd") return M.trimEnd(doc, id, M.end(clip) + (value - clip.sourceEnd) / (clip.speed || 1), { sourceDuration: ctx.sourceDuration });
+      if (key === "sourceStart") return trim("start", clip.start + (value - clip.sourceStart) / (clip.speed || 1));
+      if (key === "sourceEnd") return trim("end", M.end(clip) + (value - clip.sourceEnd) / (clip.speed || 1));
       return false;
     });
     draw(true);
@@ -174,6 +229,14 @@ export function createInspector(root, store, ctx) {
         M.locate(doc, hit.clip.id).clip.volume = r3(clamp(Number(vol.value), 0, 0.8));
       });
     }
+    const gfxSelect = e.target.closest("select[data-gfx]");
+    if (gfxSelect && hit) {
+      const key = gfxSelect.dataset.gfx;
+      store.commit(key === "sfx" ? "change sound" : key === "move" ? "change camera move" : key === "effect" ? "change voice effect" : "change graphic", (doc) => void (M.locate(doc, hit.clip.id).clip[key] = gfxSelect.value));
+      return draw(true);
+    }
+    const sfxVol = e.target.closest("[data-sfxvol]");
+    if (sfxVol && hit) store.commit("change volume", (doc) => void (M.locate(doc, hit.clip.id).clip.volume = r3(clamp(Number(sfxVol.value), 0, 1.5))));
     const caption = e.target.closest("[data-caption]");
     if (caption && hit) {
       const texts = caption.value.trim().split(/\s+/).filter(Boolean);
@@ -210,6 +273,15 @@ export function createInspector(root, store, ctx) {
       clearTimeout(typing);
       typing = setTimeout(() => store.commit("edit big caption", (doc) => void (M.locate(doc, hit.clip.id).clip.text = value.trim())), 400);
     }
+    const gfx = e.target.closest("input[data-gfx], textarea[data-gfx]");
+    if (gfx && hit) {
+      const key = gfx.dataset.gfx;
+      const value = key === "items" ? gfx.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 5) : gfx.value;
+      clearTimeout(typing);
+      typing = setTimeout(() => store.commit("edit graphic", (doc) => void (M.locate(doc, hit.clip.id).clip[key] = value)), 400);
+    }
+    const sv = e.target.closest("[data-sfxvol]");
+    if (sv) $("[data-sfxvol-out]", root).textContent = `${Math.round(Number(sv.value) * 100)}%`;
     const vol = e.target.closest("[data-volume]");
     if (vol) $("[data-volume-out]", root).textContent = `${Math.round(Number(vol.value) * 100)}%`;
   });

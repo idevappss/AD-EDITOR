@@ -94,7 +94,7 @@ function neighbors(track, clip) {
 const loops = (clip) => clip.type === "audio" && clip.loop;
 
 /** Move the clip's in point to `start` (source media follows), within its neighbors and its media. */
-export function trimStart(doc, id, start) {
+export function trimStart(doc, id, start, { ripple = false } = {}) {
   const members = group(doc, id);
   const lead = members.find((m) => m.clip.id === id);
   if (!lead) return false;
@@ -102,7 +102,8 @@ export function trimStart(doc, id, start) {
   let hi = Infinity;
   for (const { track, clip } of members) {
     const { prev } = neighbors(track, clip);
-    lo = Math.max(lo, prev - clip.start, -clip.start);
+    // A magnetic trim slides the rest of the chain instead of stopping at the neighbor.
+    lo = Math.max(lo, ripple ? -clip.start : prev - clip.start, -clip.start);
     if (isMedia(clip) && !loops(clip)) lo = Math.max(lo, -clip.sourceStart / (clip.speed || 1));
     hi = Math.min(hi, clip.duration - MIN_DUR);
   }
@@ -120,7 +121,7 @@ export function trimStart(doc, id, start) {
 }
 
 /** Move the clip's out point to `to`, within its neighbors and the source media's length. */
-export function trimEnd(doc, id, to, { sourceDuration = Infinity } = {}) {
+export function trimEnd(doc, id, to, { sourceDuration = Infinity, ripple = false } = {}) {
   const members = group(doc, id);
   const lead = members.find((m) => m.clip.id === id);
   if (!lead) return false;
@@ -128,7 +129,7 @@ export function trimEnd(doc, id, to, { sourceDuration = Infinity } = {}) {
   let hi = Infinity;
   for (const { track, clip } of members) {
     const { next } = neighbors(track, clip);
-    hi = Math.min(hi, next - end(clip));
+    if (!ripple) hi = Math.min(hi, next - end(clip));
     if (isMedia(clip) && !loops(clip) && clip.type === "video") hi = Math.min(hi, (sourceDuration - clip.sourceEnd) / (clip.speed || 1));
     if (isMedia(clip) && !loops(clip) && clip.type === "audio" && !clip.sound) hi = Math.min(hi, (sourceDuration - clip.sourceEnd) / (clip.speed || 1));
     lo = Math.max(lo, MIN_DUR - clip.duration);
@@ -218,6 +219,78 @@ export function removeRange(doc, a, b) {
   }
 }
 
+/** Overlapping or touching stretches of time joined into one list, earliest first. */
+export function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((x, y) => x[0] - y[0]);
+  const out = [];
+  for (const [a, b] of sorted) {
+    const last = out.at(-1);
+    if (last && a <= last[1] + 1e-4) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/** The tracks that carry the cut itself: picture and the sound joined to it. */
+export const isPicture = (track) => track.kind === "video" || track.role === "voice";
+
+/** Open `len` seconds of room at `at`: everything starting there or later slides right (locked tracks stay put). */
+export function insertRange(doc, at, len, skip = new Set()) {
+  if (len <= 0) return;
+  for (const track of doc.tracks) {
+    if (track.locked) continue;
+    for (const c of track.clips) if (!skip.has(c.id) && c.start >= at - 1e-4) c.start = r3(c.start + len);
+  }
+}
+
+/** Every hole in the picture chain, including one before the first clip, longest-last. */
+export function gaps(doc, { min = 0.02 } = {}) {
+  const clips = doc.tracks.filter((t) => t.kind === "video" && !t.locked).flatMap((t) => t.clips).sort((a, b) => a.start - b.start);
+  if (!clips.length) return [];
+  const out = [];
+  let from = 0;
+  for (const c of clips) {
+    if (c.start - from >= min) out.push([r3(from), r3(c.start)]);
+    from = Math.max(from, end(c));
+  }
+  return out;
+}
+
+/**
+ * Magnetic timeline: pull the picture chain together so the pieces play back to back, taking the same time out of
+ * the other tracks so captions and titles stay on their words.
+ */
+export function weld(doc) {
+  const holes = gaps(doc);
+  if (!holes.length) return false;
+  for (const [a, b] of holes.reverse()) removeRange(doc, a, b);
+  return true;
+}
+
+/**
+ * Trim one edge with the rest of the chain following: shortening pulls everything after it back, lengthening
+ * pushes everything along, and the clip itself stays welded to its neighbor.
+ */
+export function rippleTrim(doc, id, edge, to, { sourceDuration = Infinity } = {}) {
+  const hit = locate(doc, id);
+  if (!hit) return false;
+  const ids = new Set(group(doc, id).map((m) => m.clip.id));
+  const from = edge === "start" ? hit.clip.start : end(hit.clip);
+  const delta = r3(to - from);
+  if (Math.abs(delta) < 1e-4) return false;
+  if (edge === "start") {
+    if (delta < 0) insertRange(doc, from, -delta, ids);
+    if (!trimStart(doc, id, delta < 0 ? r3(from + delta) : to, { ripple: true })) return false;
+    if (delta > 0) removeRange(doc, from, to);
+    else for (const { clip } of group(doc, id)) clip.start = r3(clip.start - delta);
+    return true;
+  }
+  if (delta > 0) insertRange(doc, from, delta, ids);
+  if (!trimEnd(doc, id, to, { sourceDuration, ripple: true })) return false;
+  if (delta < 0) removeRange(doc, r3(end(locate(doc, id).clip)), from);
+  return true;
+}
+
 /**
  * Delete and close the gap. Picture (or its audio) takes its stretch of time out of the whole edit, so captions
  * and titles stay in sync; anything else only closes up its own track.
@@ -227,8 +300,9 @@ export function rippleRemove(doc, ids) {
   if (!members.length) return false;
   const picture = members.filter(({ track }) => track.kind === "video" || track.role === "voice");
   if (picture.length) {
-    const ranges = picture.map(({ clip }) => [clip.start, end(clip)]).sort((x, y) => y[0] - x[0]);
-    for (const [a, b] of ranges) removeRange(doc, a, b);
+    // A picture piece and the sound linked to it cover the same stretch: merge them, or that time comes out twice.
+    const ranges = mergeRanges(picture.map(({ clip }) => [clip.start, end(clip)]));
+    for (const [a, b] of ranges.reverse()) removeRange(doc, a, b);
     // Other selected clips outside those ranges still go, gap and all.
     const left = members.filter((m) => !picture.includes(m) && locate(doc, m.clip.id));
     if (left.length) remove(doc, left.map((m) => m.clip.id));
