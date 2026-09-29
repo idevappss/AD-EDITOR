@@ -31,7 +31,7 @@ Once a clip has a saved document, that document *is* the clip:
 - `/api/editor/…/preview` builds from it (and takes `?design=…&title=…&highlight=…` overrides on top, for the classic editor's live tweaks).
 - Renders use it too: `lib/pipeline.js` `prepareClip` calls `documentPlan` when `readSavedDocument` finds one.
 - `/api/projects/:id/clips/:clipId/preview` (the studio's own route, used by the classic editor) redirects to the editor preview when a document exists, so no screen shows the AI's cut for a clip the creator has edited.
-- A finished MP4 on disk is still whatever was last rendered — editing the timeline doesn't re-render it. The Ads tab tracks this with `renderedRev` and marks the video stale.
+- A finished MP4 on disk is still whatever was last rendered — autosave doesn't re-render it. **Save** in the header (⌘S) does: it flushes the document, then renders the clip from it (`actions.save` in `editor.js`). Each clip render records the document `rev` it was built from (`render.docRev`, set by the render route in `server.js`), and `GET …/render` reports it, so the button reads "Save" while the file is behind the timeline, "Updating video N%" while it renders, and "Saved" once it matches. The Ads tab tracks the same thing with `renderedRev` and marks the video stale.
 
 ## Staying smooth during a drag
 
@@ -78,6 +78,3 @@ These live in the document but don't reach the preview or render yet:
 - Only the first title plays, and it always opens at 0.1s.
 - Captions are regrouped by `maxWords` rather than by caption clip.
 - The voice track can be muted but has no volume level.
-- Export renders through the existing pipeline. It picks up title, look and format, but not timeline trims, splits or moves.
-
-Phase 6 replaces the export path with a composer that reads the document directly.

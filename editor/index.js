@@ -155,6 +155,20 @@ export function createEditor({ loadProject = loadFromStore } = {}) {
     return { rev: doc.rev, savedAt: doc.savedAt, duration: documentDuration(doc) };
   }));
 
+  // Where the clip's video file stands, for the header's Save button: which save it was rendered from, and any
+  // render in progress. The whole-recording "full" clip has no file of its own.
+  router.get("/projects/:projectId/clips/:clipId/render", handle(async (_req, _res, { clip }) => {
+    const r = clip.id === "full" ? null : clip.render;
+    if (!r) return { render: null };
+    const done = r.status === "done" ? r : r.previous || null;
+    return {
+      render: {
+        status: r.status, progress: r.progress ?? 0, message: r.message || "", error: r.error || null, docRev: r.docRev ?? null,
+        done: done ? { file: done.file, renderedAt: done.renderedAt, docRev: done.docRev ?? null } : null,
+      },
+    };
+  }));
+
   // Start over from the engine's plan.
   router.delete("/projects/:projectId/clips/:clipId/document", handle(async (_req, _res, { project, clip }) => {
     const current = await readDoc(project.id, clip.id);

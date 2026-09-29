@@ -35,6 +35,17 @@ Pattern that fits the channel: **a number + the lesson + a healthcare-profession
 - Stop Adding AI to a Broken Process
 - Ignition to Moonshot: The 5 Revenue Stages of a Healthcare Practice
 
+**Collapse the Timeline (keynote)**
+- 10X Is Easier Than 2X
+- The Person Who Got You Here Won't Get You There
+- Your Business Is a Rocket: Every Stage Has an Expiration Date
+- The 4 Levels of Work (Most Doctors Never Leave the Bottom Two)
+- Why 51% Conviction Is Enough
+- The Kinked Hose: Find the One Bottleneck Killing Your Practice
+- Stop Letting Patients Pay Later (You Wouldn't Do It at a Steak Dinner)
+- AI Won't Replace Your Team. It Makes One Person Do the Work of Ten.
+- Humans Are Just Walking Loops (And AI Can Run Them)
+
 **Vlogs / BTS**
 - A Day in My Life as a Multi-Million-Dollar CEO (3 Years After PT School)
 - Chasing Our First $1,000,000 Month: 14 Days, $30K a Day
@@ -72,6 +83,18 @@ Pattern that fits the channel: **a number + the lesson + a healthcare-profession
 - "It took me eight years to build a $1M business. You can do it in six months."
 - "We don't want to be right. We want to be rich."
 - "If you have money, you no longer have a problem."
+- "The cost isn't being wrong. It's the time you waste not deciding."
+- "If the decision is reversible, don't spend any time thinking about it."
+- "The people ahead of you aren't better. They're willing to fail faster."
+- "Somebody along the way just made that rule up."
+- "When did you last go to a steak dinner and ask to pay two months later?"
+- "1 out of 10 ads works. So stop spending days on 8 ads."
+- "Less than 1% of people on Instagram have 100K followers. The market is wide open."
+
+## Where posts go (so ideas fit a slot)
+- **Odell and Abby's pages:** 9 AM testimonial carousel (CTA on the last slide) · 6 PM speaking clip from long-form YouTube · 9 PM stage clip. 12 PM and 3 PM are left for their own reposts. Captions in *their* voice.
+- **Clipping pages:** 9 AM / 3 PM / 9 PM EST, 3 a day, every page a "talking page".
+- **YouTube:** Tue / Thu / Sun at 3 PM EST, with marketing graphics posted when each video goes live.
 
 ## Caption starters (Reels / TikTok / Shorts)
 Short, first person, one lesson, then a soft CTA to the workshop. Plain words, no hashtag walls.

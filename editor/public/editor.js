@@ -360,6 +360,68 @@ export async function mountEditor(root, { projectId, clipId }) {
   store.on("saved", () => watchMattes());
   ctx.toast = (text) => toast(text);
 
+  // ---------- Save: the timeline into the clip's video file ----------
+  // Edits autosave to the timeline document, and the preview plays that. Save also re-renders the clip's MP4 from
+  // it (trims, splits, moves, title, look), so the file on the project page and in the scheduler matches.
+  // ctx.render is where that file stands; the header draws the button from it.
+  ctx.render = null;
+  ctx.saving = false;
+  let renderTimer = 0;
+  let renderFrom = undefined; // the finished file's renderedAt when Save was pressed, to tell a new file from a stop
+  const busy = (r) => r && (r.status === "queued" || r.status === "rendering");
+  async function checkRender() {
+    clearTimeout(renderTimer);
+    try {
+      const { render } = await api(`${base}/render`);
+      ctx.render = render;
+      store.emit("render", render);
+      if (busy(render)) {
+        renderTimer = setTimeout(checkRender, 1500);
+        return;
+      }
+      if (renderFrom === undefined) return;
+      const fresh = render?.done && render.done.renderedAt !== renderFrom;
+      renderFrom = undefined;
+      toast(fresh ? "Saved — the video file now matches your timeline" : render?.status === "error" ? `The video didn't update: ${render.error || render.message}` : "The video update stopped, so the file wasn't changed");
+    } catch {
+      renderTimer = setTimeout(checkRender, 4000);
+    }
+  }
+
+  /** Save the timeline, then render the clip's video from it. False for the whole recording, which has no file. */
+  async function saveVideo() {
+    for (let i = 0; i < 5 && store.saveState.state !== "saved"; i++) {
+      await store.flush();
+      if (store.saveState.state === "error") throw new Error(`Couldn't save the timeline: ${store.saveState.error || "try again"}`);
+    }
+    if (clipId === "full") return false;
+    if (busy(ctx.render)) throw new Error("The video is already updating");
+    const title = store.doc.tracks.filter((t) => t.kind === "text").flatMap((t) => t.clips).sort((a, b) => a.start - b.start)[0];
+    const design = { ...store.doc.design, aspect: store.doc.aspect, showTitle: Boolean(title) };
+    await api(`/api/projects/${projectId}/clips/${clipId}`, { method: "PATCH", body: { ...(title ? { title: title.content, highlight: title.highlight || "" } : {}), design } });
+    renderFrom = ctx.render?.done?.renderedAt ?? null;
+    await api(`/api/projects/${projectId}/clips/${clipId}/render`, { method: "POST", body: {} });
+    await checkRender();
+    return true;
+  }
+
+  actions.save = async () => {
+    if (ctx.saving || busy(ctx.render)) return;
+    ctx.saving = true;
+    store.emit("render", ctx.render);
+    try {
+      const rendering = await saveVideo();
+      toast(rendering ? "Saved — updating the video file with your edits…" : "Saved");
+    } catch (err) {
+      renderFrom = undefined;
+      toast(err.message);
+    } finally {
+      ctx.saving = false;
+      store.emit("render", ctx.render);
+    }
+  };
+  checkRender();
+
   // ---------- views ----------
   const header = createHeader($(".ve-header", shell), store, ctx);
   const assets = createAssets($(".ve-rail", shell), $(".ve-assets", shell), store, ctx);
@@ -399,6 +461,7 @@ export async function mountEditor(root, { projectId, clipId }) {
       fn();
     };
     if (key === " ") return run(canvas.toggle);
+    if (cmd && key === "s") return run(actions.save);
     if (cmd && key === "z") return run(e.shiftKey ? actions.redo : actions.undo);
     if (cmd && key === "y") return run(actions.redo);
     if (cmd && key === "b") return run(actions.split);
@@ -514,6 +577,7 @@ export async function mountEditor(root, { projectId, clipId }) {
   function openShortcuts() {
     const rows = [
       ["Play / pause", "Space"],
+      ["Save and update the video", `${mod} S`],
       ["Undo", `${mod} Z`],
       ["Redo", `${mod} ⇧ Z`],
       ["Split at playhead", `${mod} B`],
@@ -535,7 +599,6 @@ export async function mountEditor(root, { projectId, clipId }) {
 
   function openExport() {
     const { clip } = data;
-    const title = store.doc.tracks.filter((t) => t.kind === "text").flatMap((t) => t.clips).sort((a, b) => a.start - b.start)[0];
     const opt = (label, values, on, note = "") => `<div class="vm-opt"><span>${label}</span><div class="seg">${values.map((v) => `<button ${v === on ? `class="on"` : "disabled"}>${v}</button>`).join("")}</div>${note ? `<small>${note}</small>` : ""}</div>`;
     modal(
       `<div class="vm-head"><h3>Export clip</h3><button class="ibtn" data-close>${I.close(16)}</button></div>
@@ -544,7 +607,7 @@ export async function mountEditor(root, { projectId, clipId }) {
         ${opt("Resolution", ["720p", "1080p", "4K"], "1080p")}
         ${opt("Frame rate", ["24", "30", "60"], "30")}
         ${opt("Captions", ["Burned in", "SRT file", "None"], "Burned in")}
-        <p class="vm-note">${I.sparkle(13)}<span>Exports use your title, look and format from here. Timeline trims, splits and moves join the export with the new render pipeline, so until then the render follows the AI's cut.</span></p>
+        <p class="vm-note">${I.sparkle(13)}<span>Exports render the timeline as it is here: trims, splits, moves, title, look and format.</span></p>
       </div>
       <div class="vm-foot"><button class="btn-ghost" data-close>Cancel</button><button class="btn-primary" data-go>${I.export(15)}<span>Export clip</span></button></div>`,
       async (e, close) => {
@@ -552,13 +615,11 @@ export async function mountEditor(root, { projectId, clipId }) {
         if (!go) return;
         go.disabled = true;
         try {
-          await store.flush();
-          const design = { ...store.doc.design, aspect: store.doc.aspect, showTitle: Boolean(title) };
-          await api(`/api/projects/${projectId}/clips/${clipId}`, { method: "PATCH", body: { ...(title ? { title: title.content, highlight: title.highlight || "" } : {}), design } });
-          await api(`/api/projects/${projectId}/clips/${clipId}/render`, { method: "POST", body: {} });
+          const rendering = await saveVideo();
           close();
-          toast(`Rendering “${clip.title}”. It shows up on the project page when it's done.`);
+          toast(rendering ? `Rendering “${clip.title}”. It shows up on the project page when it's done.` : "Saved");
         } catch (err) {
+          renderFrom = undefined;
           go.disabled = false;
           toast(err.message);
         }
@@ -579,6 +640,7 @@ export async function mountEditor(root, { projectId, clipId }) {
     window.removeEventListener("keydown", onKey);
     window.removeEventListener("beforeunload", beforeUnload);
     clearTimeout(matteTimer);
+    clearTimeout(renderTimer);
     [header, assets, canvas, inspector, timeline].forEach((v) => v.destroy());
     document.body.classList.remove("editor-mode");
   };

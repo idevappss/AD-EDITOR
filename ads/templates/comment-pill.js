@@ -30,7 +30,7 @@ export default {
       .tp-cp-typed { display: flex; align-items: center; font-weight: 900; color: #fff; letter-spacing: .01em; white-space: nowrap; }
       .tp-cp-typed i { display: inline-block; font-style: normal; max-width: 0; overflow: hidden; }
       .tp-cp-caret { display: inline-block; width: ${px(4)}px; height: 1em; margin-left: ${px(4)}px; border-radius: ${px(2)}px; background: var(--ac); opacity: 0; }
-      .tp-cp-send { flex: none; display: grid; place-items: center; width: ${px(92)}px; height: ${px(92)}px; border-radius: 50%; background: linear-gradient(135deg, #1EB4F5, var(--ac)); background: linear-gradient(in oklch longer hue 135deg, #1EB4F5, var(--ac)); box-shadow: 0 0 ${px(24)}px color-mix(in srgb, var(--ac) 45%, transparent); }
+      .tp-cp-send { flex: none; display: grid; place-items: center; width: ${px(92)}px; height: ${px(92)}px; border-radius: 50%; background: var(--ac); color: #1C1310; box-shadow: 0 0 ${px(24)}px color-mix(in srgb, var(--ac) 45%, transparent); }
       .tp-cp-send svg { width: 50%; height: 50%; }
       .tp-cp-rip { position: absolute; right: ${px(14)}px; top: 50%; width: ${px(92)}px; height: ${px(92)}px; margin-top: ${px(-46)}px; border-radius: 50%; border: ${px(4)}px solid var(--ac); box-sizing: border-box; opacity: 0; pointer-events: none; }
       .tp-cp-hand { position: absolute; z-index: 2; right: ${px(9)}px; top: calc(50% - ${px(4)}px); width: ${px(96)}px; height: ${px(96)}px; filter: drop-shadow(0 ${px(6)}px ${px(12)}px rgba(0,0,0,.45)); opacity: 0; }`,

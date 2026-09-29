@@ -680,10 +680,12 @@ app.get("/api/projects/:id/clips/:clipId/preview", async (req, res) => {
   }
 });
 
-app.post("/api/projects/:id/clips/:clipId/render", withProject((req, project) => {
+app.post("/api/projects/:id/clips/:clipId/render", withProject(async (req, project) => {
   const clip = findClip(project, req.params.clipId);
   clip.design = designFrom(clip, req.body);
-  return queueRender(project, clip.id, { design: clip.design });
+  // Which timeline save the render is built from, so the editor can tell when the file is behind the edit.
+  const doc = await readSavedDocument(project.id, clip.id).catch(() => null);
+  return queueRender(project, clip.id, { design: clip.design, docRev: doc?.rev ?? null });
 }));
 
 // ---------- dope edits ----------

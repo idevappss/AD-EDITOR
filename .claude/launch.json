@@ -56,6 +56,14 @@
         "/Users/wfp/Documents/CLAUDE/HBA CLIPS/memory/dev.js"
       ],
       "port": 5197
+    },
+    {
+      "name": "ads",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/ads/dev.js"
+      ],
+      "port": 5198
     }
   ]
 }

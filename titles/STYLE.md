@@ -29,3 +29,10 @@ Rewrite this when the favorites grow or the taste shifts.
 - **idea** (6–10 words): Title Case, the hook plus the one clarifying noun ("the workshop", "that room").
 - **youtube** (8–12 words): Title Case, third person or "I", names the person and the result, often closing on a parenthetical promise — (Full Breakdown), (Scripts Included), (In This Exact Order).
 - **post**: no liked examples yet, so follow the idea rules.
+
+## Steer clear
+
+- Vendor and back-office operations don't make titles: naming a processor, app or platform and what it does administratively. Two of those were rejected. Money, identity and belief land; admin doesn't.
+- Don't put a named company in a negative claim.
+- Spelling and punctuation get checked like the clip ships tonight — the team standard is titles that are clean and easy to read.
+- The first three seconds decide everything, so the hook has to land before the sentence finishes.

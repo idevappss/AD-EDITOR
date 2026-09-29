@@ -4,7 +4,8 @@
 //   graphic clips  { look, text, sub, highlight, items[], icon, position }   → HTML + GSAP on the clip timeline
 //   sfx clips      { sfx, volume }                                           → <audio> on the composition
 import { ASPECTS, normalizeDesign } from "../lib/compose.js";
-import { FLOAT_IN, TEMPLATES } from "./templates/index.js";
+import { FLOAT_IN, TEMPLATES, isScene, soften } from "./templates/index.js";
+import { KIT_CSS } from "./templates/_parts.js";
 
 export const LOOKS = {
   headline: "Kinetic headline",
@@ -78,6 +79,25 @@ export const SFX = {
   revswell: "Reverse swell",
   whistle: "Whistle",
   swoosh: "Swoosh",
+  // The Atlas kit's own sounds (original synthesized audio from the creator's Remotion project).
+  "atlas-whoosh": "Atlas whoosh",
+  "atlas-click": "Atlas click",
+  "atlas-pop": "Atlas pop",
+  "atlas-ding": "Atlas ding",
+  "atlas-marker": "Atlas marker strike",
+  "atlas-riser": "Atlas riser",
+  "atlas-impact": "Atlas impact",
+  "atlas-typing": "Atlas typing",
+  "atlas-success": "Atlas success",
+};
+
+/** How a full-screen scene comes in (the Remotion transitions, plus the Jeremy demo's glitch). */
+export const TRANSITIONS = ["fade", "slide", "wipe", "circle", "glitch"];
+/** Deterministic 0–1 from a string (so embers sit in the same place on every render). */
+const seeded = (key) => {
+  let h = 2166136261;
+  for (const ch of String(key)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296;
 };
 
 // Colour grades, as HyperFrames media-treatment grading (the same system lib/hfstyles.js uses).
@@ -172,6 +192,7 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
   const accent = /^#[0-9a-f]{3,8}$/i.test(brandAccent || "") ? brandAccent : d.accentColor && d.accentColor !== "#FFFFFF" ? d.accentColor : "#F4930F";
   const tall = H > W;
 
+  const fontBase = out.match(/url\("([^"]*?)fonts\/[\w-]+\.woff2"\)/)?.[1] ?? "assets/";
   const blocks = [];
   const usedTemplates = new Set();
   const cues = [];
@@ -179,8 +200,12 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
     const id = `ag-${c.id}`;
     const t0 = r3(c.start);
     const t1 = r3(c.start + c.duration);
-    const pos = POSITIONS.includes(c.position) ? c.position : c.look === "cta" || c.look === "lower-third" ? "bottom" : c.look === "list" || c.look === "compare" || c.look === "stat" ? "center" : "top";
-    const where = `ag-at-${pos}`;
+    // Full-screen scene: the kit's dark (or accent) ground covers the speaker while the voice carries on.
+    const full = isScene(TEMPLATES[c.look], c);
+    const tone = ["accent", "paper"].includes(c.tone) ? c.tone : "dark";
+    const transition = TRANSITIONS.includes(c.transition) ? c.transition : null;
+    const pos = full ? "center" : POSITIONS.includes(c.position) ? c.position : c.look === "cta" || c.look === "lower-third" ? "bottom" : c.look === "list" || c.look === "compare" || c.look === "stat" ? "center" : "top";
+    const where = `ag-at-${pos}${full ? ` ag-full tone-${tone}` : ""}`;
     let inner = "";
     let items = 0;
     let stat = null;
@@ -208,9 +233,9 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
         const row = (it, i) => {
           const chars = it.replace(/\*/g, "").length;
           const size = Math.round(Math.min(px(tall ? 76 : 66), (W * 0.8 - px(110)) / (Math.max(chars, 8) * 0.56)));
-          return `<div class="ag-li" id="${id}-i${i}" style="--lt:${size}px"><span class="ag-tick" id="${id}-c${i}"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="41" pathLength="100"/><path d="M31 52 45 65 70 37" pathLength="100"/></svg></span><span class="ag-lt-text" id="${id}-t${i}">${keyWords(it).map(([w, hot], j) => (hot ? `<span class="ag-hot" id="${id}-h${i}-${j}">${esc(w)}</span>` : esc(w))).join(" ")}</span></div>`;
+          return `<div class="ag-li" id="${id}-i${i}" style="--lt:${size}px"><span class="ag-tick" id="${id}-c${i}"><svg viewBox="0 0 100 100"><circle class="rim" cx="50" cy="50" r="41"/><circle cx="50" cy="50" r="41" pathLength="100" transform="rotate(-90 50 50)"/><path d="M33 52 45 64 68 38" pathLength="100"/></svg></span><span class="ag-lt-text" id="${id}-t${i}">${keyWords(it).map(([w, hot], j) => (hot ? `<span class="ag-hot" id="${id}-h${i}-${j}">${esc(w)}</span>` : esc(w))).join(" ")}</span></div>`;
         };
-        inner = `<div class="ag-list">${kicker}<div class="ag-items">${list.map(row).join("")}</div></div>`;
+        inner = `<div class="ag-list" id="${id}-card">${kicker}<div class="ag-items">${list.map(row).join("")}</div></div>`;
         break;
       }
       case "lower-third":
@@ -221,7 +246,7 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
         break;
       case "cta":
         // A clean button, and a cursor that glides onto it and clicks (ripple, press, click sound).
-        inner = `<div class="ag-cta">${c.sub ? `<div class="ag-cta-sub" id="${id}-sub">${esc(c.sub)}</div>` : ""}<div class="ag-btn" id="${id}-btn">${icon("calendar", px(46), 2.6)}<span>${esc(c.text || "Book a call")}</span><i class="ag-shine" id="${id}-shine"></i></div><i class="ag-ripple" id="${id}-rip"></i><svg class="ag-cursor" id="${id}-cur" viewBox="0 0 24 24"><path d="M5 3.2 19.2 12 12.6 13.5 16.3 20.3 13.6 21.7 9.9 14.9 5.2 19.4Z"/></svg></div>`;
+        inner = `<div class="ag-cta">${c.sub ? `<div class="ag-cta-sub" id="${id}-sub">${esc(c.sub)}</div>` : ""}<div class="ag-btn" id="${id}-btn"><span>${esc(c.text || "Start Your 7 Day Free Trial")}</span></div><i class="ag-ripple" id="${id}-rip"></i><svg class="ag-cursor" id="${id}-cur" viewBox="0 0 24 24"><path d="M5 3.2 19.2 12 12.6 13.5 16.3 20.3 13.6 21.7 9.9 14.9 5.2 19.4Z"/></svg></div>`;
         break;
       case "compare": {
         const [bad = "", good = ""] = c.items || [];
@@ -274,8 +299,17 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
     }
     if (c.look === "logo") inner = `<div class="ag-logo-wrap">${inner}</div>`;
     if (c.look === "list") blocks.push(`<div id="${id}-scrim" class="ag-scrim"></div>`);
+    // The scene ground: grain, and on the dark ground ember motes rising and twinkling (fx.tsx Dust).
+    let motes = [];
+    if (full) {
+      if (tone === "dark") {
+        const rnd = seeded(c.id);
+        motes = Array.from({ length: 34 }, () => [rnd(), rnd(), 0.2 + rnd() * 0.9, 2 + rnd() * 4, rnd()]);
+      }
+      blocks.push(`<div id="${id}-bd" class="ag-bd tone-${tone}"><i class="ag-grain" id="${id}-gr"></i>${motes.map(([x, y, , sz], k) => `<i class="ag-mote" id="${id}-e${k}" style="left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;width:${px(sz)}px;height:${px(sz)}px;--g:${px(sz * 3)}px"></i>`).join("")}</div>`);
+    }
     blocks.push(`<div id="${id}" class="ag ag-look-${c.look || "headline"} ${where}">${inner}</div>`);
-    cues.push({ id, look: c.look || "headline", t0, t1, items, stat, pos, strike: Boolean(c.strike), mark: markLetters, kw: kickerWords, face: c.face ? { top: r3(ANCHOR - (ANCHOR - c.face.top) * OPEN), bottom: r3(ANCHOR - (ANCHOR - c.face.bottom) * OPEN) } : null, count: statCount(t1 - t0), times: c.look === "list" ? listTimes(t1 - t0, items) : null, data: tplData, low: TEMPLATES[c.look]?.position === "bottom" });
+    cues.push({ id, look: c.look || "headline", t0, t1, items, stat, pos, strike: Boolean(c.strike), mark: markLetters, kw: kickerWords, full, tr: full ? transition || TRANSITIONS.slice(0, 4)[graphics.filter((g) => isScene(TEMPLATES[g.look], g)).indexOf(c) % 4] : null, motes: motes.map(([, , sp, , tw]) => [r3(sp * 30 * u), r3(tw)]), face: c.face && !full ? { top: r3(ANCHOR - (ANCHOR - c.face.top) * OPEN), bottom: r3(ANCHOR - (ANCHOR - c.face.bottom) * OPEN) } : null, count: statCount(t1 - t0), times: c.look === "list" ? listTimes(t1 - t0, items) : null, data: tplData, low: TEMPLATES[c.look]?.position === "bottom" });
   }
 
   const audio = sounds
@@ -289,59 +323,66 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
 
   const css = `
       /* ---- Ads Editor graphics (ads/graphics.js) ---- */
-      .ag { position: absolute; left: 0; right: 0; z-index: 90; display: flex; justify-content: center; pointer-events: none; visibility: hidden; opacity: 0; font-family: "Inter", system-ui, sans-serif; color: #fff; --ac: ${accent}; }
+      @font-face { font-family: "Inter"; src: url("${fontBase}fonts/inter-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+      @font-face { font-family: "Inter"; src: url("${fontBase}fonts/inter-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+      @font-face { font-family: "Inter"; src: url("${fontBase}fonts/inter-latin-700-normal.woff2") format("woff2"); font-weight: 700; }
+      ${[500, 600, 700, 800].map((w) => `@font-face { font-family: "Plus Jakarta Sans"; src: url("${fontBase}fonts/plus-jakarta-sans-latin-${w}-normal.woff2") format("woff2"); font-weight: ${w}; }`).join("\n      ")}
+      @font-face { font-family: "JetBrains Mono"; src: url("${fontBase}fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+      .ag-bd { --ac: ${accent}; --brand: ${accent}; }
+      .ag { position: absolute; left: 0; right: 0; z-index: 90; display: flex; justify-content: center; pointer-events: none; visibility: hidden; opacity: 0; font-family: "Inter", system-ui, sans-serif; color: #fff; --ac: ${accent}; --brand: ${accent}; }
       .ag-at-top { top: ${tall ? 11 : 7}%; }
       .ag-at-center { top: 0; bottom: 0; align-items: center; }
       .ag-at-bottom { bottom: ${tall ? 23 : 12}%; }
       .ag-headline, .ag-iconcard { max-width: ${tall ? 88 : 70}%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: ${px(18)}px; }
-      .ag-head { font-weight: 900; font-size: ${px(tall ? 92 : 84)}px; line-height: 1.02; letter-spacing: -0.035em; text-shadow: 0 ${px(6)}px ${px(30)}px rgba(0,0,0,.55); }
-      .ag-head.sm { font-size: ${px(tall ? 74 : 66)}px; }
+      .ag-head { font-weight: 800; font-size: ${px(tall ? 88 : 80)}px; line-height: 1.04; letter-spacing: -0.045em; color: #F5EFE8; text-shadow: 0 0 ${px(30)}px rgba(255,236,220,.3), 0 ${px(4)}px ${px(24)}px rgba(0,0,0,.5); }
+      .ag-head.sm { font-size: ${px(tall ? 70 : 62)}px; }
       .ag-w { display: inline-block; will-change: transform, opacity, filter; }
-      .ag-w.hot { position: relative; color: #fff; z-index: 0; padding: 0 .08em; }
-      .ag-w.hot::before { content: ""; position: absolute; z-index: -1; left: -.04em; right: -.04em; top: .1em; bottom: .02em; border-radius: .12em; background: var(--ac); transform: scaleX(var(--sw, 1)); transform-origin: 0 50%; box-shadow: 0 0 .5em color-mix(in srgb, var(--ac) 60%, transparent); }
-      .ag-sub { font-weight: 700; font-size: ${px(40)}px; letter-spacing: -0.01em; color: rgba(255,255,255,.9); text-shadow: 0 ${px(3)}px ${px(18)}px rgba(0,0,0,.6); }
+      .ag-w.hot { position: relative; color: var(--ac); text-shadow: 0 0 ${px(28)}px color-mix(in srgb, var(--ac) 45%, transparent), 0 ${px(4)}px ${px(24)}px rgba(0,0,0,.5); }
+      .ag-w.hot::before { content: none; }
+      .ag-sub { font-weight: 600; font-size: ${px(36)}px; letter-spacing: -0.005em; color: rgba(245,239,232,.82); text-shadow: 0 ${px(3)}px ${px(18)}px rgba(0,0,0,.6); }
       .ag-card { position: relative; padding: ${px(44)}px ${px(56)}px; border-radius: ${px(40)}px; background: rgba(0,0,0,.74); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: 0 0 0 ${Math.max(1, px(2))}px rgba(255,255,255,.1), 0 ${px(40)}px ${px(120)}px rgba(0,0,0,.55); }
       .ag-stat { text-align: center; }
-      .ag-num { font-weight: 900; font-size: ${px(142)}px; line-height: 1; letter-spacing: -0.045em; color: #fff; font-variant-numeric: tabular-nums; text-shadow: 0 0 ${px(40)}px color-mix(in srgb, var(--ac) 60%, transparent), 0 ${px(8)}px ${px(30)}px rgba(0,0,0,.5); will-change: transform; }
-      .ag-stat.v-pill { padding: ${px(26)}px ${px(46)}px; border-radius: 999px; border: 2px solid transparent; background: linear-gradient(rgba(14,14,18,.72), rgba(14,14,18,.72)) padding-box, linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,255,255,.2) 30%, rgba(255,255,255,.05) 60%, rgba(255,255,255,.6)) border-box; backdrop-filter: blur(${px(16)}px); -webkit-backdrop-filter: blur(${px(16)}px); }
-      .ag-stat.v-pill .ag-num { font-size: ${px(112)}px; color: var(--ac); text-shadow: 0 0 ${px(26)}px color-mix(in srgb, var(--ac) 50%, transparent); }
-      .ag-stat.v-pill.money .ag-num { color: #2FE06A; }
-      .ag-stat.money .ag-num { color: #2FE06A; text-shadow: 0 0 ${px(26)}px rgba(47,224,106,.55), 0 0 ${px(70)}px rgba(47,224,106,.35), 0 ${px(8)}px ${px(30)}px rgba(0,0,0,.5); }
-      .ag-stat .ag-sub { margin-top: ${px(8)}px; font-size: ${px(36)}px; font-weight: 800; color: #fff; text-shadow: 0 ${px(4)}px ${px(20)}px rgba(0,0,0,.7); }
-      .ag-list { display: flex; flex-direction: column; align-items: center; gap: ${px(18)}px; max-width: 94%; filter: drop-shadow(0 ${px(6)}px ${px(22)}px rgba(0,0,0,.6)); }
-      .ag-scrim { position: absolute; left: 0; right: 0; bottom: 0; height: ${tall ? 50 : 60}%; z-index: 89; pointer-events: none; visibility: hidden; opacity: 0; background: linear-gradient(0deg, rgba(0,0,0,.55), rgba(0,0,0,.3) 55%, rgba(0,0,0,0)); }
-      .ag-hk { font-family: "Inter", system-ui, sans-serif; font-weight: 900; font-size: ${px(tall ? 50 : 44)}px; line-height: 1; letter-spacing: 0.02em; text-transform: uppercase; color: #fff; white-space: nowrap; }
+      .ag-num { font-weight: 800; font-size: ${px(tall ? 190 : 160)}px; line-height: 1; letter-spacing: -0.055em; color: #F5EFE8; font-variant-numeric: tabular-nums; text-shadow: 0 0 ${px(30)}px rgba(255,236,220,.3), 0 ${px(4)}px ${px(24)}px rgba(0,0,0,.5); will-change: transform, filter; }
+      .ag-stat.v-pill { padding: ${px(30)}px ${px(56)}px ${px(34)}px; border-radius: ${px(40)}px; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); }
+      .ag-stat.v-pill .ag-num { font-size: ${px(130)}px; color: var(--ac); text-shadow: 0 0 ${px(30)}px color-mix(in srgb, var(--ac) 45%, transparent); }
+      .ag-stat.v-pill.money .ag-num { color: #3DDC84; text-shadow: 0 0 ${px(30)}px rgba(61,220,132,.45); }
+      .ag-stat.money .ag-num { color: #3DDC84; text-shadow: 0 0 ${px(34)}px rgba(61,220,132,.45), 0 ${px(6)}px ${px(26)}px rgba(0,0,0,.5); }
+      .ag-stat .ag-sub { margin-top: ${px(12)}px; font-size: ${px(34)}px; font-weight: 600; color: rgba(245,239,232,.85); text-shadow: 0 ${px(3)}px ${px(18)}px rgba(0,0,0,.7); }
+      .ag-list { display: block; box-sizing: border-box; width: ${Math.round(W * (tall ? 0.84 : 0.46))}px; padding: ${px(30)}px ${px(36)}px ${px(24)}px; border-radius: ${px(34)}px; color: #F5EFE8; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); }
+      .ag-scrim { position: absolute; left: 0; right: 0; bottom: 0; height: ${tall ? 46 : 56}%; z-index: 89; pointer-events: none; visibility: hidden; opacity: 0; background: linear-gradient(0deg, rgba(0,0,0,.42), rgba(0,0,0,.18) 55%, rgba(0,0,0,0)); }
+      .ag-hk { margin-bottom: ${px(14)}px; font-family: "SF Mono", "SFMono-Regular", Menlo, "Courier Prime", monospace; font-weight: 500; font-size: ${px(24)}px; line-height: 1.2; letter-spacing: .2em; text-transform: uppercase; color: var(--ac); white-space: nowrap; }
       .ag-kw { display: inline-block; will-change: transform, opacity, filter; }
-      .ag-kw.hot { color: var(--ac); text-shadow: 0 0 ${px(26)}px color-mix(in srgb, var(--ac) 45%, transparent); }
-      .ag-items { display: grid; justify-items: center; }
-      .ag-li { grid-area: 1 / 1; display: flex; align-items: center; gap: ${px(22)}px; visibility: hidden; opacity: 0; will-change: transform, opacity, filter; }
-      .ag-li .ag-tick, .ag-li .ag-lt-text { visibility: hidden; opacity: 0; }
-      .ag-tick { flex: none; width: calc(var(--lt) * 1.1); height: calc(var(--lt) * 1.1); filter: drop-shadow(0 0 ${px(10)}px var(--ac)) drop-shadow(0 0 ${px(26)}px color-mix(in srgb, var(--ac) 60%, transparent)); }
+      .ag-kw.hot { color: var(--ac); }
+      .ag-items { display: flex; flex-direction: column; }
+      .ag-li { display: flex; align-items: center; gap: ${px(18)}px; padding: ${px(10)}px 0; will-change: opacity; }
+      .ag-li .ag-tick, .ag-li .ag-lt-text { visibility: visible; }
+      .ag-tick { flex: none; width: ${px(44)}px; height: ${px(44)}px; filter: drop-shadow(0 0 ${px(6)}px rgba(61,220,132,.35)); }
       .ag-tick svg { width: 100%; height: 100%; overflow: visible; }
-      .ag-tick circle, .ag-tick path { fill: none; stroke: var(--ac); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; }
-      .ag-lt-text { font-family: "Inter", system-ui, sans-serif; font-weight: 900; font-size: var(--lt); line-height: 1.05; letter-spacing: -0.01em; text-transform: uppercase; color: #fff; white-space: nowrap; }
-      .ag-hot { display: inline-block; color: var(--ac); text-shadow: 0 0 ${px(24)}px color-mix(in srgb, var(--ac) 45%, transparent); }
+      .ag-tick circle.rim { stroke: rgba(245,239,232,.22); stroke-width: 3.5; stroke-dasharray: none; stroke-dashoffset: 0; }
+      .ag-tick circle, .ag-tick path { fill: none; stroke: #3DDC84; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; }
+      .ag-lt-text { font-family: "Inter", system-ui, sans-serif; font-weight: 600; font-size: ${px(38)}px; line-height: 1.2; letter-spacing: -0.01em; color: #F5EFE8; opacity: .42; white-space: nowrap; }
+      .ag-hot { display: inline; color: var(--ac); }
       .ag-lt { position: relative; display: flex; align-items: stretch; margin-right: auto; margin-left: ${tall ? 6 : 5}%; }
-      .ag-lt-bar { display: block; width: ${px(16)}px; border-radius: ${px(8)}px; background: var(--ac); transform-origin: 50% 100%; }
-      .ag-lt-body { display: flex; flex-direction: column; gap: ${px(6)}px; margin-left: ${px(20)}px; padding: ${px(22)}px ${px(36)}px; border-radius: ${px(20)}px; background: rgba(0,0,0,.78); box-shadow: 0 ${px(20)}px ${px(60)}px rgba(0,0,0,.45); clip-path: inset(0 0 0 0 round ${px(20)}px); }
-      .ag-lt-body b { font-weight: 900; font-size: ${px(54)}px; letter-spacing: -0.02em; }
-      .ag-lt-body span { font-weight: 600; font-size: ${px(34)}px; color: rgba(255,255,255,.78); }
-      .ag-badge { display: inline-flex; align-items: center; gap: ${px(16)}px; padding: ${px(20)}px ${px(40)}px; border-radius: 999px; background: var(--ac); color: #fff; font-weight: 900; font-size: ${px(50)}px; letter-spacing: .02em; text-transform: uppercase; box-shadow: 0 ${px(18)}px ${px(60)}px color-mix(in srgb, var(--ac) 45%, transparent), 0 0 0 ${px(6)}px rgba(255,255,255,.14); }
+      .ag-lt-bar { display: block; width: ${px(6)}px; border-radius: ${px(3)}px; background: var(--ac); box-shadow: 0 0 ${px(16)}px var(--ac); transform-origin: 50% 100%; }
+      .ag-lt-body { display: flex; flex-direction: column; gap: ${px(6)}px; margin-left: ${px(16)}px; padding: ${px(22)}px ${px(34)}px; border-radius: ${px(22)}px; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); clip-path: inset(0 0 0 0 round ${px(22)}px); }
+      .ag-lt-body b { font-weight: 800; font-size: ${px(48)}px; letter-spacing: -0.03em; color: #F5EFE8; }
+      .ag-lt-body span { font-family: "SF Mono", Menlo, monospace; font-weight: 500; font-size: ${px(22)}px; letter-spacing: .18em; text-transform: uppercase; color: var(--ac); }
+      .ag-badge { display: inline-flex; align-items: center; gap: ${px(16)}px; padding: ${px(22)}px ${px(42)}px; border-radius: 999px; background: rgba(28,22,19,.8); color: #F5EFE8; font-weight: 700; font-size: ${px(44)}px; letter-spacing: -0.015em; box-shadow: inset 0 0 0 ${px(3)}px color-mix(in srgb, var(--ac) 80%, transparent), 0 0 ${px(44)}px color-mix(in srgb, var(--ac) 38%, transparent); backdrop-filter: blur(${px(14)}px); -webkit-backdrop-filter: blur(${px(14)}px); }
       .ag-cta { position: relative; display: flex; flex-direction: column; align-items: center; gap: ${px(20)}px; }
-      .ag-cta-sub { font-weight: 800; font-size: ${px(40)}px; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; text-shadow: 0 ${px(4)}px ${px(20)}px rgba(0,0,0,.6); }
-      .ag-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: ${px(14)}px; padding: ${px(22)}px ${px(44)}px; border-radius: 999px; background: var(--ac); color: #000; font-weight: 900; font-size: ${px(42)}px; letter-spacing: -0.01em; text-transform: uppercase; box-shadow: 0 ${px(20)}px ${px(60)}px rgba(0,0,0,.45), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 45%, transparent); }
+      .ag-cta-sub { font-family: "SF Mono", "SFMono-Regular", Menlo, monospace; font-weight: 500; font-size: ${px(26)}px; text-transform: uppercase; letter-spacing: 0.2em; color: #F5EFE8; text-shadow: 0 ${px(3)}px ${px(16)}px rgba(0,0,0,.7); }
+      .ag-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: ${px(14)}px; padding: ${px(28)}px ${px(58)}px; border-radius: 999px; background: var(--ac); color: #1C1310; font-weight: 800; font-size: ${px(46)}px; letter-spacing: -0.02em; box-shadow: 0 0 ${px(60)}px color-mix(in srgb, var(--ac) 50%, transparent), 0 ${px(18)}px ${px(40)}px rgba(0,0,0,.3); }
       .ag-shine { position: absolute; top: -20%; bottom: -20%; width: 30%; left: -40%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.6), transparent); transform: skewX(-18deg); }
-      .ag-ripple { position: absolute; left: 62%; bottom: ${px(24)}px; width: ${px(90)}px; height: ${px(90)}px; margin: ${px(-45)}px 0 0 ${px(-45)}px; border-radius: 50%; border: ${px(6)}px solid #fff; visibility: hidden; opacity: 0; }
+      .ag-ripple { position: absolute; left: 62%; bottom: ${px(24)}px; width: ${px(90)}px; height: ${px(90)}px; margin: ${px(-45)}px 0 0 ${px(-45)}px; border-radius: 50%; border: ${px(3)}px solid rgba(255,255,255,.9); visibility: hidden; opacity: 0; }
       .ag-cursor { position: absolute; left: 62%; bottom: ${px(-40)}px; width: ${px(72)}px; height: ${px(72)}px; overflow: visible; visibility: hidden; opacity: 0; transform-origin: 20% 12%; filter: drop-shadow(0 ${px(8)}px ${px(14)}px rgba(0,0,0,.45)); }
       .ag-cursor path { fill: #fff; stroke: #000; stroke-width: 1.4; stroke-linejoin: round; }
       .ag-compare { display: flex; gap: ${px(24)}px; width: ${tall ? 90 : 70}%; }
-      .ag-col { flex: 1; padding: ${px(34)}px ${px(36)}px; border-radius: ${px(32)}px; background: rgba(0,0,0,.78); box-shadow: 0 ${px(30)}px ${px(90)}px rgba(0,0,0,.5); }
-      .ag-col-h { display: flex; align-items: center; gap: ${px(14)}px; font-weight: 900; font-size: ${px(40)}px; text-transform: uppercase; letter-spacing: .04em; }
-      .ag-col.bad .ag-col-h { color: rgba(255,255,255,.55); }
-      .ag-col.good { box-shadow: 0 0 0 ${px(4)}px var(--ac), 0 ${px(30)}px ${px(90)}px color-mix(in srgb, var(--ac) 35%, transparent); }
+      .ag-col { flex: 1; padding: ${px(32)}px ${px(34)}px; border-radius: ${px(30)}px; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); }
+      .ag-col-h { display: flex; align-items: center; gap: ${px(12)}px; font-family: "SF Mono", Menlo, monospace; font-weight: 500; font-size: ${px(24)}px; text-transform: uppercase; letter-spacing: .18em; }
+      .ag-col.bad .ag-col-h { color: rgba(245,239,232,.5); }
+      .ag-col.good { box-shadow: inset 0 0 0 ${px(3)}px var(--ac), 0 0 ${px(60)}px color-mix(in srgb, var(--ac) 30%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); }
       .ag-col.good .ag-col-h { color: var(--ac); }
-      .ag-col p { margin: ${px(16)}px 0 0; font-weight: 800; font-size: ${px(46)}px; line-height: 1.15; letter-spacing: -0.015em; }
-      .ag-col.bad p { color: rgba(255,255,255,.62); text-decoration: line-through; text-decoration-color: rgba(255,255,255,.4); }
+      .ag-col p { margin: ${px(14)}px 0 0; font-weight: 700; font-size: ${px(42)}px; line-height: 1.15; letter-spacing: -0.02em; color: #F5EFE8; }
+      .ag-col.bad p { color: rgba(245,239,232,.5); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ac) 80%, transparent); text-decoration-thickness: ${px(4)}px; }
       .ag-logo-wrap { display: flex; flex-direction: column; align-items: center; gap: ${px(16)}px; }
       .ag-logos { position: relative; display: flex; align-items: center; justify-content: center; gap: ${px(tall ? 70 : 90)}px; padding: ${px(10)}px ${px(30)}px; }
       .ag-lg { display: block; will-change: transform, filter; }
@@ -356,26 +397,27 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
       .ag-x { position: absolute; inset: -4%; width: 108%; height: 108%; overflow: visible; pointer-events: none; filter: drop-shadow(0 ${px(10)}px ${px(22)}px rgba(0,0,0,.4)); visibility: hidden; opacity: 0; will-change: transform, opacity; }
       /* The X is always red: it means "no", whatever the brand colour is. */
       .ag-x path { fill: none; stroke: #E5261F; stroke-width: 12; stroke-linecap: round; }
-      .ag-mark { font-family: "Inter", system-ui, sans-serif; font-weight: 900; font-size: ${px(tall ? 84 : 72)}px; line-height: 1; letter-spacing: 0.14em; margin-right: -0.14em; text-transform: uppercase; color: #fff; text-shadow: 0 0 ${px(22)}px rgba(255,255,255,.45), 0 ${px(6)}px ${px(26)}px rgba(0,0,0,.45); will-change: letter-spacing, filter; }
+      .ag-mark { font-family: "Inter", system-ui, sans-serif; font-weight: 800; font-size: ${px(tall ? 84 : 72)}px; line-height: 1; letter-spacing: 0.16em; margin-right: -0.16em; text-transform: uppercase; color: #F5EFE8; text-shadow: 0 0 ${px(30)}px rgba(255,236,220,.35), 0 ${px(6)}px ${px(26)}px rgba(0,0,0,.45); will-change: letter-spacing, filter; }
       .ag-ml { display: inline-block; will-change: transform, opacity, filter; }
-      .ag-slide { width: ${tall ? 86 : 52}%; padding: ${px(10)}px; border-radius: ${px(30)}px; border: 2px solid transparent; overflow: hidden;
-        background: linear-gradient(rgba(20,20,24,.6), rgba(20,20,24,.6)) padding-box, linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,255,255,.2) 25%, rgba(255,255,255,.05) 60%, rgba(255,255,255,.6)) border-box;
-        box-shadow: 0 ${px(30)}px ${px(80)}px rgba(0,0,0,.45); will-change: transform, opacity, filter; }
+      .ag-slide { width: ${tall ? 86 : 52}%; padding: ${px(10)}px; border-radius: ${px(30)}px; overflow: hidden; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); will-change: transform, opacity, filter; }
       .ag-slide img { display: block; width: 100%; max-height: ${Math.round(H * (tall ? 0.34 : 0.62))}px; object-fit: contain; border-radius: ${px(22)}px; transform-origin: 50% 40%; }
       .ag-bigcheck { display: flex; flex-direction: column; align-items: center; gap: ${px(14)}px; }
-      .ag-bc { width: ${px(tall ? 300 : 240)}px; height: ${px(tall ? 300 : 240)}px; overflow: visible; filter: drop-shadow(0 0 ${px(18)}px var(--ac)) drop-shadow(0 0 ${px(50)}px color-mix(in srgb, var(--ac) 55%, transparent)); will-change: transform; }
-      .ag-bc-ring { fill: color-mix(in srgb, var(--ac) 16%, transparent); stroke: var(--ac); stroke-width: 8; stroke-dasharray: 100; stroke-dashoffset: 100; }
-      .ag-bc-tick { fill: none; stroke: #fff; stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; }
-      .ag-bc-word { font-weight: 900; font-size: ${px(64)}px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; text-shadow: 0 ${px(4)}px ${px(22)}px rgba(0,0,0,.55); }
-      .ag-proof { display: flex; align-items: flex-start; gap: ${px(18)}px; width: ${tall ? 70 : 40}%; padding: ${px(20)}px ${px(24)}px; border-radius: ${px(30)}px; background: rgba(12,12,14,.78); backdrop-filter: blur(${px(14)}px); -webkit-backdrop-filter: blur(${px(14)}px); box-shadow: 0 0 0 ${Math.max(1, px(2))}px rgba(255,255,255,.08), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.45); will-change: transform, opacity, filter; }
-      .ag-pf-av { flex: none; display: grid; place-items: center; width: ${px(64)}px; height: ${px(64)}px; border-radius: 50%; background: var(--ac); color: #000; font-weight: 900; font-size: ${px(30)}px; }
+      .ag-bc { width: ${px(tall ? 260 : 210)}px; height: ${px(tall ? 260 : 210)}px; overflow: visible; filter: drop-shadow(0 0 ${px(14)}px color-mix(in srgb, var(--ac) 55%, transparent)); will-change: transform; }
+      .ag-bc-ring { fill: rgba(28,22,19,.55); stroke: var(--ac); stroke-width: 4; stroke-dasharray: 100; stroke-dashoffset: 100; }
+      .ag-bc-tick { fill: none; stroke: #F5EFE8; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; }
+      .ag-bc-word { font-weight: 800; font-size: ${px(60)}px; letter-spacing: -0.03em; color: #F5EFE8; text-shadow: 0 0 ${px(30)}px rgba(255,236,220,.3), 0 ${px(4)}px ${px(24)}px rgba(0,0,0,.5); }
+      .ag-proof { display: flex; align-items: flex-start; gap: ${px(18)}px; width: ${tall ? 76 : 42}%; box-sizing: border-box; padding: ${px(22)}px ${px(26)}px; border-radius: ${px(28)}px; background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); will-change: transform, opacity, filter; }
+      .ag-pf-av { flex: none; display: grid; place-items: center; width: ${px(60)}px; height: ${px(60)}px; border-radius: 50%; background: var(--ac); color: #1C1310; font-weight: 800; font-size: ${px(28)}px; }
       .ag-pf-body { min-width: 0; }
       .ag-pf-head { display: flex; align-items: baseline; gap: ${px(14)}px; margin-bottom: ${px(6)}px; }
-      .ag-pf-head b { font-weight: 800; font-size: ${px(30)}px; color: #fff; }
-      .ag-pf-head span { font-weight: 600; font-size: ${px(22)}px; color: color-mix(in srgb, var(--ac) 85%, #fff); }
-      .ag-proof p { margin: 0; font-weight: 600; font-size: ${px(30)}px; line-height: 1.3; color: rgba(255,255,255,.92); }
-      .ag-orb { display: grid; place-items: center; width: ${px(190)}px; height: ${px(190)}px; border-radius: 50%; color: #fff; background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--ac) 80%, #fff), var(--ac)); box-shadow: 0 0 ${px(80)}px color-mix(in srgb, var(--ac) 60%, transparent), 0 0 0 ${px(12)}px color-mix(in srgb, var(--ac) 22%, transparent); }`;
+      .ag-pf-head b { font-weight: 700; font-size: ${px(30)}px; color: #F5EFE8; }
+      .ag-pf-head span { font-family: "SF Mono", Menlo, monospace; font-weight: 500; font-size: ${px(18)}px; letter-spacing: .16em; text-transform: uppercase; color: var(--ac); }
+      .ag-proof p { margin: 0; font-weight: 500; font-size: ${px(30)}px; line-height: 1.32; color: rgba(245,239,232,.9); }
+      .ag-orb { display: grid; place-items: center; width: ${px(170)}px; height: ${px(170)}px; border-radius: 50%; color: var(--ac); background: linear-gradient(180deg, rgba(50,40,35,.8), rgba(28,22,19,.84)); backdrop-filter: blur(${px(18)}px); -webkit-backdrop-filter: blur(${px(18)}px); box-shadow: inset 0 0 0 ${Math.max(1, px(2))}px color-mix(in srgb, var(--ac) 36%, transparent), 0 0 ${px(50)}px color-mix(in srgb, var(--ac) 14%, transparent), 0 ${px(24)}px ${px(70)}px rgba(0,0,0,.35); }`;
 
+  // Where the face sits on screen, for caption placement: each piece's face band and the framing's zoom steps.
+  const capFaces = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips).filter((v) => v.face).map((v) => [r3(v.start), r3(v.start + v.duration), v.face.top, v.face.bottom]);
+  const capZoom = framingProgram(doc, graphics).map((p) => [p.t, p.scale, p.to ?? p.scale, p.dur ?? 0]);
   const script = `
         // ---- Ads Editor graphics (ads/graphics.js) ----
         (function () {
@@ -406,8 +448,61 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
             el.style.height = "auto";
             el.style.alignItems = "flex-start";
           }
+          // Captions (the creator, 2026-09-28): in the middle of the frame by default, right on top of a card or CTA in
+          // the lower half when one is up; only when that would cover the face, a graphic, a CTA or a logo, all the
+          // way at the top, else all the way at the bottom. Placed once per caption for its whole time on screen
+          // (static, so seek-safe). The face band uses the most zoomed-in the shot gets while the caption is up.
+          var CAP_FACES = ${JSON.stringify(capFaces)}, CAP_ZOOM = ${JSON.stringify(capZoom)}, CAP_ANCHOR = ${ANCHOR};
+          function zoomIn(s, e) {
+            var z = 1;
+            CAP_ZOOM.forEach(function (p, i) {
+              var next = CAP_ZOOM[i + 1] ? CAP_ZOOM[i + 1][0] : Infinity;
+              if (p[0] < e && next > s) z = Math.max(z, p[1], p[2]);
+            });
+            return z;
+          }
+          function placeCaptions() {
+            var caps = document.querySelectorAll(".cap");
+            if (!caps.length) return;
+            var root = caps[0].parentElement, rr = root.getBoundingClientRect(), k = FH / (rr.height || FH), pad = 0.018 * FH;
+            var boxes = CUES.filter(function (c) { return !c.full; }).map(function (c) {
+              var el = document.getElementById(c.id), inner = el && el.firstElementChild;
+              if (!inner) return null;
+              var t1 = el.style.transform, t2 = inner.style.transform;
+              el.style.transform = "none"; inner.style.transform = "none";
+              // The whole graphic, including what it draws outside its box (sonar rings, glows, a cursor).
+              var top = Infinity, bottom = -Infinity;
+              [inner].concat([].slice.call(inner.children)).forEach(function (n) {
+                var r = n.getBoundingClientRect();
+                if (r.height && r.width) { top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); }
+              });
+              el.style.transform = t1; inner.style.transform = t2;
+              return bottom > top ? { t0: c.t0, t1: c.t1, a: (top - rr.top) * k, b: (bottom - rr.top) * k } : null;
+            }).filter(Boolean);
+            caps.forEach(function (cap) {
+              var s = Number(cap.getAttribute("data-start")) || 0, e = s + (Number(cap.getAttribute("data-duration")) || 0);
+              var inner = cap.firstElementChild, h = (inner && inner.offsetHeight) || 0.06 * FH;
+              var avoid = [], above = [];
+              var z = zoomIn(s, e);
+              CAP_FACES.forEach(function (f) {
+                if (f[0] < e && f[1] > s) avoid.push({ a: (CAP_ANCHOR - (CAP_ANCHOR - f[2]) * z) * FH - pad, b: (CAP_ANCHOR - (CAP_ANCHOR - f[3]) * z) * FH + pad });
+              });
+              boxes.forEach(function (g) {
+                if (g.t0 < e && g.t1 > s) {
+                  avoid.push({ a: g.a - pad, b: g.b + pad });
+                  if (g.a > 0.4 * FH) above.push(g.a - 2 * pad - h / 2);
+                }
+              });
+              var tries = above.concat([0.5, 0.44, 0.56, 0.38, 0.62].map(function (y) { return y * FH; }), [0.07 * FH + h / 2, 0.9 * FH - h / 2]);
+              var pick = tries.filter(function (y) {
+                return y - h / 2 >= 0.05 * FH && y + h / 2 <= 0.93 * FH && !avoid.some(function (b) { return y + h / 2 > b.a && y - h / 2 < b.b; });
+              })[0];
+              cap.style.top = Math.round(pick == null ? 0.9 * FH - h / 2 : pick) + "px";
+            });
+          }
           CUES.forEach(place);
-          if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { CUES.forEach(place); });
+          placeCaptions();
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { CUES.forEach(place); placeCaptions(); });
           function fmt(n, s) {
             var v = s.decimals ? n.toFixed(s.decimals) : String(Math.round(n));
             if (s.commas) v = v.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ",");
@@ -415,57 +510,75 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
           }
           // Template library timelines (ads/templates/), with the shared float-in and drift helpers.
           ${FLOAT_IN}
-          var TPL = {${[...usedTemplates].map((tid) => `${JSON.stringify(tid)}: function (c, el, t0, t1, len, out) {${TEMPLATES[tid].script}\n          }`).join(",\n")}};
+          var TPL = {${[...usedTemplates].map((tid) => `${JSON.stringify(tid)}: function (c, el, t0, t1, len, out) {${soften(TEMPLATES[tid].script)}\n          }`).join(",\n")}};
           CUES.forEach(function (c) {
             var el = "#" + c.id, t0 = c.t0, t1 = c.t1, len = Math.max(0.6, t1 - t0);
             var out = Math.max(t0 + 0.5, t1 - 0.32);
             tl.set(el, { autoAlpha: 1 }, t0);
             tl.set(el, { autoAlpha: 0 }, t1);
-            if (hideCaps[c.look] || c.pos === "center") {
+            if (c.full) {
+              // The scene: its ground and content come in together with the scene's transition (the Remotion
+              // TransitionSeries: fade, slide from the bottom, wipe, a circle reveal; or the Jeremy demo's glitch).
+              var bd = el + "-bd", both = [bd, el], s0 = Math.max(0, t0 - 0.12);
+              tl.set(bd, { autoAlpha: 0 }, Math.max(0, t0 - 0.2));
+              if (c.tr === "fade" || !c.tr) tl.fromTo(bd, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, ease: "power2.out", immediateRender: false }, s0);
+              else {
+                tl.set(bd, { autoAlpha: 1 }, s0);
+                if (c.tr === "slide") tl.fromTo(both, { yPercent: 100 }, { yPercent: 0, duration: 0.55, ease: "expo.out", immediateRender: false }, s0);
+                else if (c.tr === "wipe") tl.fromTo(both, { clipPath: "inset(100% 0% 0% 0%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: 0.5, ease: "expo.out", immediateRender: false }, s0);
+                else if (c.tr === "circle") tl.fromTo(both, { clipPath: "circle(0% at 50% 50%)" }, { clipPath: "circle(150% at 50% 50%)", duration: 0.7, ease: "expo.out", immediateRender: false }, s0);
+                else if (c.tr === "glitch") {
+                  var gx = [0, 42, -30, 18, -8, 0], gf = ["none", "hue-rotate(40deg) contrast(1.6)", "brightness(1.8) saturate(0)", "hue-rotate(-30deg) contrast(1.4)", "brightness(1.2)", "none"];
+                  for (var gi = 0; gi < gx.length; gi++) tl.set(both, { x: gx[gi], filter: gf[gi] }, s0 + gi * 0.045);
+                }
+              }
+              tl.fromTo(el + "-gr", { x: 0, y: 0 }, { x: 37, y: -53, duration: len + 0.3, ease: "steps(" + Math.max(4, Math.round((len + 0.3) * 12)) + ")", immediateRender: false }, s0);
+              (c.motes || []).forEach(function (m, k) {
+                var mote = el + "-e" + k;
+                tl.fromTo(mote, { y: 0 }, { y: -m[0] * (len + 0.4), duration: len + 0.4, ease: "none", immediateRender: false }, s0);
+                tl.fromTo(mote, { opacity: 0.2 }, { opacity: 0.55, duration: 0.6 + m[1] * 0.8, yoyo: true, repeat: Math.max(1, Math.floor(len / 0.8)), ease: "sine.inOut", immediateRender: false }, s0 + m[1] * 0.5);
+              });
+              tl.fromTo(bd, { autoAlpha: 1 }, { autoAlpha: 0, duration: 0.3, ease: "power2.in", immediateRender: false }, t1 - 0.3);
+            }
+            if (c.full) {
               tl.set(".cap", { autoAlpha: 0 }, t0);
               tl.set(".cap", { autoAlpha: 1 }, t1);
             }
             var box = el + " > *";
+            CUR_T0 = t0;
             if (TPL[c.look]) {
               TPL[c.look](c, el, t0, t1, len, out);
             } else if (c.look === "headline" || c.look === "icon") {
+              // Words blur in one after another; the key word is simply in the accent. A slow push while it's up.
               var ws = []; for (var i = 0; i < c.items; i++) ws.push(el + "-w" + i);
-              if (c.look === "icon") tl.fromTo(el + "-orb", { scale: 0, rotation: -90 }, { scale: 1, rotation: 0, duration: 0.6, ease: "back.out(2)", immediateRender: false }, t0);
-              if (ws.length) tl.fromTo(ws.join(","), { autoAlpha: 0, y: 60, scale: 0.9, filter: "blur(14px)" }, { autoAlpha: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "expo.out", stagger: Math.min(0.08, 0.5 / ws.length), immediateRender: false }, t0 + (c.look === "icon" ? 0.2 : 0));
-              tl.fromTo(el + " .ag-w.hot", { "--sw": 0 }, { "--sw": 1, duration: 0.4, ease: "power3.out", immediateRender: false }, t0 + 0.3);
-              tl.fromTo(el + " .ag-sub", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: "power2.out", immediateRender: false }, t0 + 0.35);
-              tl.fromTo(box, { scale: 1 }, { scale: 1.035, duration: len, ease: "sine.inOut", immediateRender: false }, t0);
+              if (c.look === "icon") blurIn(el + "-orb", t0, { y: 16, s: 0.9, b: 14 });
+              if (ws.length) blurIn(ws.join(","), t0 + (c.look === "icon" ? 0.2 : 0), { y: 22, b: 16, d: 0.6, st: Math.min(0.09, 0.6 / ws.length) });
+              blurIn(el + " .ag-sub", t0 + 0.4, { y: 12, b: 8 });
+              tl.fromTo(box, { scale: 1 }, { scale: 1.025, duration: len, ease: "none", immediateRender: false }, t0);
             } else if (c.look === "stat") {
-              // Pops in, counts up (counter sound), lands with a punch and a glow (cha-ching).
-              tl.fromTo(box, { autoAlpha: 0, scale: 0.6, filter: "blur(12px)" }, { autoAlpha: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "back.out(1.8)", immediateRender: false }, t0);
+              // Blurs in, counts up (counter sound), lands with a soft glow (cha-ching). No punch.
+              blurIn(box, t0, { y: 24, s: 0.96, b: 18, d: 0.7 });
               var land = t0 + 0.1 + c.count;
               if (c.stat) {
                 var s = c.stat, obj = { v: 0 }, num = document.querySelector(el + "-num");
-                tl.fromTo(obj, { v: 0 }, { v: s.value, duration: c.count, ease: "power1.inOut", immediateRender: false, onUpdate: function () { num.textContent = fmt(obj.v, s); } }, t0 + 0.1);
+                tl.fromTo(obj, { v: 0 }, { v: s.value, duration: c.count, ease: "power2.out", immediateRender: false, onUpdate: function () { num.textContent = fmt(obj.v, s); } }, t0 + 0.1);
               }
-              tl.fromTo(el + "-num", { scale: 1 }, { scale: 1.14, duration: 0.12, yoyo: true, repeat: 1, ease: "power2.out", immediateRender: false }, land);
-              tl.fromTo(el + "-num", { filter: "brightness(1)" }, { filter: "brightness(1.35)", duration: 0.15, yoyo: true, repeat: 1, ease: "power1.out", immediateRender: false }, land);
-              tl.fromTo(box, { scale: 1 }, { scale: 1.04, duration: Math.max(0.3, out - land - 0.3), ease: "sine.inOut", immediateRender: false }, land + 0.3);
+              tl.fromTo(el + "-num", { filter: "brightness(1)" }, { filter: "brightness(1.25)", duration: 0.25, yoyo: true, repeat: 1, ease: "sine.inOut", immediateRender: false }, land);
+              tl.fromTo(box, { scale: 1 }, { scale: 1.02, duration: Math.max(0.3, out - land), ease: "none", immediateRender: false }, land);
             } else if (c.look === "list") {
-              // Kicker words rise in; then one item at a time: bubble pops, check draws, words slide in, it pops out.
+              // The task card: one glass card, a mono kicker, every item waiting dim with an empty circle; each ticks
+              // green and brightens as it's said (one tick sound each, ads/build.js).
               tl.fromTo(el + "-scrim", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.45, ease: "power2.out", immediateRender: false }, t0 - 0.1);
               tl.fromTo(el + "-scrim", { autoAlpha: 1 }, { autoAlpha: 0, duration: 0.4, ease: "power2.inOut", immediateRender: false }, out - 0.05);
-              for (var j = 0; j < c.kw; j++) tl.fromTo(el + "-kw" + j, { autoAlpha: 0, y: 30, filter: "blur(8px)" }, { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 0.5, ease: "expo.out", immediateRender: false }, t0 + j * 0.07);
+              blurIn(el + "-card", t0, { y: 40, b: 16, d: 0.75 });
               for (var k = 0; k < c.items; k++) {
                 var at = t0 + c.times[k];
-                var li = el + "-i" + k;
-                tl.fromTo(li, { autoAlpha: 0, scale: 1, filter: "blur(0px)" }, { autoAlpha: 1, duration: 0.01, immediateRender: false }, at);
-                tl.fromTo(el + "-c" + k, { autoAlpha: 0, scale: 0 }, { autoAlpha: 1, scale: 1, duration: 0.4, ease: "back.out(2.4)", immediateRender: false }, at);
-                tl.fromTo(el + "-c" + k + " circle", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.3, ease: "power2.out", immediateRender: false }, at);
-                tl.fromTo(el + "-c" + k + " path", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.2, ease: "power2.out", immediateRender: false }, at + 0.28);
-                tl.fromTo(el + "-t" + k, { autoAlpha: 0, x: -30, filter: "blur(6px)" }, { autoAlpha: 1, x: 0, filter: "blur(0px)", duration: 0.45, ease: "expo.out", immediateRender: false }, at + 0.42);
-                document.querySelectorAll(li + " .ag-hot").forEach(function (h) {
-                  tl.fromTo(h, { scale: 0.7 }, { scale: 1, duration: 0.35, ease: "back.out(2.6)", immediateRender: false }, at + 0.55);
-                });
-                if (k < c.items - 1) tl.fromTo(li, { autoAlpha: 1, scale: 1, filter: "blur(0px)" }, { autoAlpha: 0, scale: 0.85, filter: "blur(8px)", duration: 0.28, ease: "power2.in", immediateRender: false }, t0 + c.times[k + 1] - 0.3);
+                tl.fromTo(el + "-c" + k + " circle:not(.rim)", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.35, ease: "power2.out", immediateRender: false }, at);
+                tl.fromTo(el + "-c" + k + " path", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.22, ease: "power2.out", immediateRender: false }, at + 0.22);
+                tl.fromTo(el + "-t" + k, { opacity: 0.42 }, { opacity: 1, duration: 0.3, ease: "power1.out", immediateRender: false }, at + 0.1);
               }
             } else if (c.look === "compare") {
-              tl.fromTo(box, { autoAlpha: 0, y: 40, scale: 0.92, filter: "blur(8px)" }, { autoAlpha: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 0.65, ease: "expo.out", immediateRender: false }, t0);
+              blurIn(box, t0, { y: 30, b: 16, d: 0.75 });
               var gap = Math.min(1.2, Math.max(0.35, (len - 1.2) / Math.max(1, c.items)));
               for (var k = 0; k < c.items; k++) {
                 tl.fromTo(el + "-i" + k, { autoAlpha: 0, x: -40, filter: "blur(6px)" }, { autoAlpha: 1, x: 0, filter: "blur(0px)", duration: 0.55, ease: "expo.out", immediateRender: false }, t0 + 0.3 + k * gap);
@@ -483,70 +596,67 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
                 lg.forEach(function (q) {
                   var at = hit + q * 0.14;
                   // The X slams down onto each logo: in from big with a twist, a bounce, and the logo gives under it.
-                  tl.fromTo(el + "-x" + q, { autoAlpha: 0, scale: 2.4, rotation: -30 }, { autoAlpha: 1, scale: 1, rotation: 0, duration: 0.32, ease: "back.out(2.4)", immediateRender: false }, at);
+                  tl.fromTo(el + "-x" + q, { autoAlpha: 0, scale: 1.35, rotation: -8, filter: "blur(8px)" }, { autoAlpha: 1, scale: 1, rotation: 0, filter: "blur(0px)", duration: 0.3, ease: "power3.out", immediateRender: false }, at);
                   tl.fromTo(el + "-l" + q, { scale: 1, opacity: 1 }, { scale: 0.9, opacity: 0.7, duration: 0.16, ease: "power2.out", immediateRender: false }, at + 0.08);
                 });
               } else {
                 // The hero: flies up from the speaker's chest with motion blur, lands with an overshoot, glows and floats.
-                tl.fromTo(el + "-l0", { autoAlpha: 0, y: ${Math.round(H * 0.36)}, scaleX: 0.8, scaleY: 1.3, filter: "blur(22px)" }, { autoAlpha: 1, y: 0, scaleX: 1, scaleY: 1, filter: "blur(0px)", duration: 0.55, ease: "expo.out", immediateRender: false }, t0);
+                tl.fromTo(el + "-l0", { autoAlpha: 0, y: ${Math.round(H * 0.08)}, scale: 0.92, filter: "blur(24px)" }, { autoAlpha: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 0.85, ease: "power3.out", immediateRender: false }, t0);
                 tl.fromTo(el + "-g0", { filter: "drop-shadow(0px 0px 0px rgba(244,147,15,0))" }, { filter: "drop-shadow(0px 0px 46px rgba(244,147,15,0.75))", duration: 0.5, ease: "power2.out", immediateRender: false }, t0 + 0.3);
-                tl.fromTo(el + "-g0", { y: 0, rotation: 0 }, { y: -14, rotation: 1.5, duration: Math.max(0.4, len - 0.8), ease: "sine.inOut", immediateRender: false }, t0 + 0.6);
+                tl.fromTo(el + "-g0", { y: 0 }, { y: -8, duration: Math.max(0.4, len - 0.8), ease: "sine.inOut", immediateRender: false }, t0 + 0.6);
                 if (c.mark) {
                   // The name: letters zoom down into place one by one, flash with a glow, then the tracking slowly opens up.
-                  for (var m = 0; m < c.mark; m++) tl.fromTo(el + "-m" + m, { autoAlpha: 0, y: 40, scale: 1.8, filter: "blur(14px)" }, { autoAlpha: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 0.55, ease: "expo.out", immediateRender: false }, t0 + 0.35 + m * 0.06);
-                  var lit = t0 + 0.35 + c.mark * 0.06 + 0.3;
-                  tl.fromTo(el + "-mark", { filter: "brightness(1) drop-shadow(0 0 0px rgba(255,255,255,0))" }, { filter: "brightness(1.3) drop-shadow(0 0 26px rgba(255,255,255,0.85))", duration: 0.22, yoyo: true, repeat: 1, ease: "power2.out", immediateRender: false }, lit);
-                  tl.fromTo(el + "-mark", { letterSpacing: "0.14em" }, { letterSpacing: "0.22em", duration: Math.max(0.5, out - lit), ease: "sine.out", immediateRender: false }, lit);
+                  for (var m = 0; m < c.mark; m++) tl.fromTo(el + "-m" + m, { autoAlpha: 0, filter: "blur(14px)" }, { autoAlpha: 1, filter: "blur(0px)", duration: 0.6, ease: "power3.out", immediateRender: false }, t0 + 0.35 + m * 0.05);
+                  tl.fromTo(el + "-mark", { letterSpacing: "0.3em" }, { letterSpacing: "0.16em", duration: 1.1, ease: "power3.out", immediateRender: false }, t0 + 0.35);
                 }
               }
               tl.fromTo(el + " .ag-logo-wrap", { scale: 1 }, { scale: 0.88, duration: 0.35, ease: "power2.in", immediateRender: false }, out - 0.05);
             } else if (c.look === "slide") {
-              tl.fromTo(el + "-card", { autoAlpha: 0, y: 140, rotation: -6, scale: 0.8, filter: "blur(12px)" }, { autoAlpha: 1, y: 0, rotation: 0, scale: 1, filter: "blur(0px)", duration: 0.7, ease: "expo.out", immediateRender: false }, t0);
+              blurIn(el + "-card", t0, { y: 40, s: 0.96, b: 16, d: 0.8 });
               tl.fromTo(el + "-img", { scale: 1 }, { scale: 1.08, duration: Math.max(0.5, len - 0.7), ease: "sine.inOut", immediateRender: false }, t0 + 0.4);
               tl.fromTo(el + "-card", { y: 0 }, { y: -8, duration: Math.max(0.5, len - 0.8), ease: "sine.inOut", immediateRender: false }, t0 + 0.7);
             } else if (c.look === "check") {
               // Circle pops and draws, the check strokes in, a punch on the landing, then it breathes.
-              tl.fromTo(el + "-bc", { scale: 0.3, rotation: -90, autoAlpha: 0 }, { scale: 1, rotation: 0, autoAlpha: 1, duration: 0.55, ease: "back.out(2.2)", immediateRender: false }, t0);
+              blurIn(el + "-bc", t0, { y: 0, s: 0.9, b: 12, d: 0.6 });
               tl.fromTo(el + "-ring", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out", immediateRender: false }, t0 + 0.05);
               tl.fromTo(el + "-tick", { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.28, ease: "power3.out", immediateRender: false }, t0 + 0.4);
-              tl.fromTo(el + "-bc", { scale: 1 }, { scale: 1.12, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out", immediateRender: false }, t0 + 0.66);
-              tl.fromTo(el + "-word", { autoAlpha: 0, y: 24, filter: "blur(6px)" }, { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 0.4, ease: "expo.out", immediateRender: false }, t0 + 0.55);
+              tl.fromTo(el + "-bc", { filter: "brightness(1)" }, { filter: "brightness(1.3)", duration: 0.2, yoyo: true, repeat: 1, ease: "sine.inOut", immediateRender: false }, t0 + 0.66);
+              blurIn(el + "-word", t0 + 0.55, { y: 14, b: 10 });
               tl.fromTo(el + "-bc", { y: 0 }, { y: -8, duration: Math.max(0.3, len - 1.1), ease: "sine.inOut", immediateRender: false }, t0 + 0.9);
             } else if (c.look === "proof") {
-              tl.fromTo(el + "-card", { autoAlpha: 0, x: 120, scale: 0.94, filter: "blur(8px)" }, { autoAlpha: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.6, ease: "expo.out", immediateRender: false }, t0);
+              blurIn(el + "-card", t0, { y: 24, x: 30, b: 14, d: 0.7 });
               tl.fromTo(el + "-card", { y: 0 }, { y: -8, duration: Math.max(0.4, len - 0.9), ease: "sine.inOut", immediateRender: false }, t0 + 0.6);
             } else if (c.look === "lower-third") {
               tl.fromTo(el + "-bar", { scaleY: 0 }, { scaleY: 1, duration: 0.35, ease: "power3.out", immediateRender: false }, t0);
               tl.fromTo(el + "-body", { clipPath: "inset(0 100% 0 0 round ${px(20)}px)", x: -30 }, { clipPath: "inset(0 0% 0 0 round ${px(20)}px)", x: 0, duration: 0.55, ease: "power3.out", immediateRender: false }, t0 + 0.15);
             } else if (c.look === "callout") {
-              tl.fromTo(box, { autoAlpha: 0, scale: 0.3, rotation: -8 }, { autoAlpha: 1, scale: 1, rotation: 0, duration: 0.5, ease: "back.out(2.2)", immediateRender: false }, t0);
-              tl.fromTo(box, { y: 0 }, { y: -12, duration: Math.max(0.3, len - 0.8), ease: "sine.inOut", immediateRender: false }, t0 + 0.5);
+              blurIn(box, t0, { y: 18, s: 0.95, b: 12 });
+              tl.fromTo(box, { y: 0 }, { y: -6, duration: Math.max(0.3, len - 0.8), ease: "sine.inOut", immediateRender: false }, t0 + 0.6);
             } else if (c.look === "cta") {
               // Button pops, the cursor glides onto it, clicks (press + ripple), then the button breathes.
-              tl.fromTo(el + "-sub", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: "power2.out", immediateRender: false }, t0);
-              tl.fromTo(el + "-btn", { autoAlpha: 0, scale: 0.6, y: 40, filter: "blur(8px)" }, { autoAlpha: 1, scale: 1, y: 0, filter: "blur(0px)", duration: 0.55, ease: "back.out(1.8)", immediateRender: false }, t0);
+              blurIn(el + "-sub", t0, { y: 10, b: 8 });
+              blurIn(el + "-btn", t0 + 0.05, { y: 26, s: 0.94, b: 14, d: 0.7 });
               var click = t0 + ${CTA_CLICK};
               tl.fromTo(el + "-cur", { autoAlpha: 0, x: ${px(260)}, y: ${px(240)} }, { autoAlpha: 1, x: 0, y: 0, duration: 0.55, ease: "power3.out", immediateRender: false }, click - 0.6);
               tl.fromTo(el + "-cur", { scale: 1 }, { scale: 0.82, duration: 0.07, yoyo: true, repeat: 1, ease: "power2.out", immediateRender: false }, click);
               tl.fromTo(el + "-btn", { scale: 1 }, { scale: 0.93, duration: 0.08, yoyo: true, repeat: 1, ease: "power2.out", immediateRender: false }, click);
               tl.fromTo(el + "-rip", { autoAlpha: 0.9, scale: 0.2 }, { autoAlpha: 0, scale: 2.6, duration: 0.5, ease: "power2.out", immediateRender: false }, click);
-              tl.fromTo(el + "-shine", { left: "-40%" }, { left: "120%", duration: 0.6, ease: "power1.inOut", immediateRender: false }, click + 0.05);
-              if (out - click > 1.2) tl.fromTo(el + "-btn", { scale: 1 }, { scale: 1.04, duration: 0.5, yoyo: true, repeat: Math.max(1, Math.floor((out - click - 0.6) / 0.5)), ease: "sine.inOut", immediateRender: false }, click + 0.4);
+              if (out - click > 1.2) tl.fromTo(el + "-btn", { scale: 1 }, { scale: 1.025, duration: 0.9, yoyo: true, repeat: Math.max(1, Math.floor((out - click - 0.6) / 0.9)), ease: "sine.inOut", immediateRender: false }, click + 0.4);
             }
-            tl.fromTo(el, { autoAlpha: 1, y: 0, filter: "blur(0px)" }, { autoAlpha: 0, y: c.pos === "bottom" ? 30 : -24, filter: "blur(8px)", duration: 0.4, ease: "power2.inOut", immediateRender: false }, out - 0.08);
+            tl.fromTo(el, { autoAlpha: 1, y: 0, filter: "blur(0px)" }, { autoAlpha: 0, y: c.pos === "bottom" ? 16 : -14, filter: "blur(10px)", duration: 0.42, ease: "power2.in", immediateRender: false }, out - 0.08);
           });
         })();
 `;
 
   const tplCss = [...usedTemplates].map((tid) => TEMPLATES[tid].css({ px, W, H, tall })).join("\n");
-  out = out.replace("</style>", `${css}\n${tplCss}\n    </style>`);
+  out = out.replace("</style>", `${css}\n${KIT_CSS({ px, tall })}\n${tplCss}\n    </style>`);
   const close = out.lastIndexOf("</div>\n    <script>");
   if (close < 0) throw new Error("Unexpected composition layout");
   out = `${out.slice(0, close)}${blocks.join("\n      ")}\n      ${audio.join("\n      ")}\n    ${out.slice(close)}`;
   if (cues.length) {
     const hook = out.lastIndexOf("window.__timelines = window.__timelines || {};");
     if (hook < 0) throw new Error("Unexpected composition script");
-    out = `${out.slice(0, hook)}${script}\n        ${out.slice(hook)}`;
+    out = `${out.slice(0, hook)}${soften(script)}\n        ${out.slice(hook)}`;
   }
   return out;
 }

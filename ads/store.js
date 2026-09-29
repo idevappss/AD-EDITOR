@@ -53,8 +53,34 @@ export async function adFor(projectId, clipId) {
   return (await load()).ads.find((a) => a.projectId === projectId && a.clipId === clipId) || null;
 }
 
+/**
+ * Patch one ad. The patch lands on the ad as it is on disk now, not only on the caller's copy: a long job holds its
+ * `ad` across minutes, and if another process wrote db.json meanwhile (load() re-reads it), writing the caller's
+ * stale copy back would undo that process's changes. Only the patched fields are written.
+ */
 export async function update(ad, patch) {
-  Object.assign(ad, patch, { updatedAt: new Date().toISOString() });
+  const stamped = { ...patch, updatedAt: new Date().toISOString() };
+  Object.assign(ad, stamped);
+  const current = (await load()).ads.find((a) => a.id === ad.id);
+  if (current && current !== ad) Object.assign(current, stamped);
   await persist();
   return ad;
+}
+
+// data/ads/settings.json: the creator's two grade templates (Assets LUT ids) and which one new ads start on.
+//   { gradeTemplates: [lutId | "none", lutId | "none"], defaultTemplate: 1 | 2 }
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+
+export async function readSettings() {
+  const data = await fs.readFile(SETTINGS_FILE, "utf8").then(JSON.parse, () => ({}));
+  const t = Array.isArray(data.gradeTemplates) ? data.gradeTemplates : [];
+  return { gradeTemplates: [t[0] || "none", t[1] || "none"], defaultTemplate: data.defaultTemplate === 2 ? 2 : 1 };
+}
+
+export async function writeSettings(settings) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = `${SETTINGS_FILE}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  await fs.writeFile(tmp, `${JSON.stringify(settings, null, 2)}\n`);
+  await fs.rename(tmp, SETTINGS_FILE);
+  return settings;
 }

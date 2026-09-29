@@ -9,6 +9,50 @@ talking-head direct-response ad in this style.
 The overall feel is clean and premium, with very little on screen. The words and the speaker carry the ad. Graphics appear
 only when a **brand/product is named**, and each graphic is big and bold.
 
+
+## The creator's edit checklist (from reviewing every ad, 2026-09-28/29): every new ad must pass all of these
+
+These are the mistakes the creator found one by one. The builder enforces most of them automatically (noted in
+brackets); the planner must never work against them.
+
+1. **Start on the first spoken word.** Never open on the speaker standing there. The transcript often stretches the first
+   words over silence, so where the voice is comes from the raw recording. [ads/levels.js, speechOnly]
+2. **Never clip a word.** Each word's end follows its real sound ("human?" was cut mid-word), and cut ends cover the
+   tail. [extendWordTails]
+3. **End right after the final call to action** ("…start your free trial." / "…click below." / "…to learn more." /
+   "…try it out for seven days…"), 0.3 s after the voice actually stops, measured on the raw recording, because word timings
+   run late. No "See you inside.", "Your choice.", "So I encourage you…", no stray flash of a later take, and never
+   a second of the speaker just standing there at the end. [endOnCta, endOnVoice, dropSlivers] Keep ranges should end
+   on the CTA sentence, too.
+4. **One ending offer**, picked at upload: the ATLAS 7-day free trial (the default; the CTA reads "Start free trial" /
+   "Start your 7-day free trial") or Book a call. Never mention the other. [options.offer, OFFERS]
+5. **The voice always plays clean:** no voice effects at all (no muffle, underwater or phone; they make "the voice go
+   off"). [BANNED_VOICEFX]
+6. **No glitch sounds.** [BANNED_SFX]
+7. **Sound effects sit under the voice.** Swooshes, whooshes, air and risers are never louder than the music bed;
+   everything else is at least 12 dB under the voice. The music bed is at 0.112. [sfxCap, AD_SFX_GAIN, AD_MUSIC_LEVEL]
+8. **Captions** sit in the middle, or right on top of a card or CTA; they go to the very top or bottom only to clear a
+   face, a graphic, a CTA or a logo. [placeCaptions]
+9. **Graphics follow the Atlas kit** (minimal dark glass, soft blur-ins, no bounce), with 2–4 full-screen kit scenes where
+   the words say what Atlas does, and a different creative direction from the last two ads. [DIRECTIONS]
+10. **The ATLAS logo is never distorted, and nothing disappears into its background:** on the coral ground the accent
+    becomes ink. [KIT_CSS]
+11. **One take of every line, the best one; the CTA exactly once.** When the speaker retakes a line ("click below, it will
+    change your life" … "click below and start your 7-day free trial"), only the take that makes the most sense
+    (usually the last, complete one) plays. Never two CTAs. If the plan reuses the same footage twice, only the later use
+    keeps it. Deliberate repetition inside one take ("You don't need to learn how to code. You don't need to learn any
+    technicalities.") is rhetoric and stays. [retakeSpans, overlap trim]
+12. **The very end is the last CTA word:** "…seven day free trial" ends there, before "or decide to be left behind",
+    "Atlas is going to change your life", "see you inside" or a stray "Just"/"You". Only a further CTA ("…and learn
+    more") may follow. [endOnCta]
+13. **No half-words at any cut:** a cut never lands inside a word the plan left out (half a "You're" before a jump), and
+    the ad never opens on a stray fragment of an earlier take followed by a jump. [clearDroppedWords, dropLeadIsland]
+14. **The X over ChatGPT/Claude only when the speaker knocks them** ("stop using ChatGPT", "it just gives you more
+    work", "wasn't built for you"). Named in passing or compared ("large language models like ChatGPT and Claude")
+    means the logos without an X, or no logo moment at all.
+15. **The CTA design rotates** from ad to ad: the glowing button, search CTA, 7-day pass, end card or wordmark, never
+    the same as the last two ads. The words stay the offer's. [CTA_STYLES]
+
 ## Cuts
 - **Tighten the speech first.** Start on the first word of the good take at frame 0. Cut the earlier false start, the
   "okay, ready?" slate, a flubbed word ("spitting, spitting"), and a repeated phrase in the CTA ("click below, click the link
@@ -25,7 +69,17 @@ only when a **brand/product is named**, and each graphic is big and bold.
   adjacent shots are the same size. There is no slow Ken-Burns drift inside shots; the scale changes only at cuts and in the logo transitions.
 - No B-roll, no screen recordings, no stock footage in this style.
 
-## Motion graphics (brand-mention logos only; about 1 every 6–9 s, 3 in total)
+## Motion language: the Atlas kit (the creator's call, 2026-09-28)
+
+Every graphic now follows the look of the creator's own Atlas motion ads (`ads/references/atlas-motion-kit.md`). It is
+minimal and calm: dark warm glass with a thin accent hairline, small mono kickers, two-tone lines (cream, then the
+accent), soft blur-ins and blur-outs, a slow 3D settle on cards, and no bounce, pop or overshoot. The kit's scenes are
+templates (task card, light-trail prompt, word swap, strike & replace, carousel, chat, org chart, end card…). Some play
+as **full-screen cutaways** (the dark or accent ground over the speaker while the voice carries on), 1–3 per ad.
+Two-tone statements and word swaps are allowed now, as kit scenes; the "no titles or headlines" rule below still
+holds for plain text cards over the speaker's face.
+
+## Motion graphics (brand-mention logos; about 1 every 6–9 s, 3 in total)
 Rule: **when the speaker names a brand or product, its logo appears huge, at the same moment as the word.**
 - **Competitor logos placed behind the speaker** (the speaker is cut out, so the logo sits between the wall and the person):
   - 6.0–6.9 s, on "Claude": an orange starburst (≈ `#FC6B00`) fills about 120 % of the frame width, centred behind the head.
@@ -45,15 +99,16 @@ Rule: **when the speaker names a brand or product, its logo appears huge, at the
   - **Hold** for about 4.3 s. It survives jump cuts, and the wordmark does a quick blur pulse on a cut (about 17.5 s).
   - **Exit** (19.7–20.4 s): the wordmark blurs out. The icon changes colour from orange to yellow `#FFD400` while it
     melts and blurs into a soft yellow square, then vanishes in about 0.6 s.
-- **Super minimal (the creator's rule):** no titles, headlines, text cards, badges, glowing words, emojis, arrows or
-  stickers — ever. Logos are the only graphics, always transparent (no boxes behind them), always animated in and out.
-  Competitors named together get one moment side by side with a fat red X slamming across them.
+- **Super minimal (the creator's rule):** no plain titles, headlines, text cards, badges, glowing words, emojis, arrows or
+  stickers over the speaker (the kit's two-tone scenes above are the exception). Logos are the only graphics, always transparent (no boxes behind them), always animated in and out.
+  Competitors named together get one moment side by side; the fat red X slams across them only when the speaker is
+  clearly putting them down (checklist item 14).
 - **Exception the creator loves: number moments.** A key number (trial length, price, money made) gets a big card that
   pops in on the word, counts up to the number and pops out, with a bass hit. Only the 1–3 strongest numbers.
-- **And checklist moments.** When the speaker runs through what you get, the items tick in one by one (pop per tick).
-  No card: a hand-written kicker ("What you get") with a brush underline and sparks, then bold italic caps lines with a
-  glowing tick circle each and ONE key word per line in the brand accent with its own brush underline (mark it with
-  *stars*, usually "free"). 2–4 items, at most one or two per ad.
+- **And checklist moments.** When the speaker runs through what you get, a glass task card blurs in with a mono kicker
+  ("What you get") and every item waiting dim beside an empty circle. Each one ticks green and brightens as it's
+  said (a soft tick per item), with ONE key word per line in the brand accent (mark it with *stars*, usually "free").
+  2–4 items, at most one or two per ad.
 
 ## Captions
 - **None.** If the creator turns captions on, keep them plain: no cursive/italic serif emphasis. There are no burned-in captions or keyword pop-ups in this style. Captions are **off by default** for this

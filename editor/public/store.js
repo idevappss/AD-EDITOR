@@ -183,6 +183,10 @@ export function createStore({ document, save }) {
     get saveState() {
       return s.save;
     },
+    /** The server revision of the last save. */
+    get rev() {
+      return s.rev;
+    },
     get dragging() {
       return Boolean(s.gesture);
     },

@@ -756,15 +756,8 @@ async function showHome() {
         <section class="card home-hero">
           <div class="hh-top">
             <div class="hh-copy">
-              <h1>One video in.<br /><span>Viral clips out.</span></h1>
-              <p class="lede">Upload a long video or drop a link. We'll find the best moments, add captions, and get them ready to post — in minutes.</p>
-              <div class="source-row">
-                <button type="button" class="source-btn yt" data-source="YouTube" title="Paste a YouTube link"><svg viewBox="0 0 24 24" width="22" height="22"><rect x="2" y="5" width="20" height="14" rx="4.5" fill="#FF0033"/><path d="m10 9 5 3-5 3z" fill="#fff"/></svg></button>
-                <button type="button" class="source-btn" data-source="TikTok" title="Paste a TikTok link"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M14.5 3h2.7a4.6 4.6 0 0 0 3.8 3.9v2.8a7.3 7.3 0 0 1-3.8-1.2v6.6A5.6 5.6 0 1 1 11.6 9.5v2.9a2.8 2.8 0 1 0 2.9 2.8z" fill="#25F4EE" transform="translate(-.6 -.4)"/><path d="M14.5 3h2.7a4.6 4.6 0 0 0 3.8 3.9v2.8a7.3 7.3 0 0 1-3.8-1.2v6.6A5.6 5.6 0 1 1 11.6 9.5v2.9a2.8 2.8 0 1 0 2.9 2.8z" fill="#FE2C55" transform="translate(.6 .4)"/><path d="M14.5 3h2.7a4.6 4.6 0 0 0 3.8 3.9v2.8a7.3 7.3 0 0 1-3.8-1.2v6.6A5.6 5.6 0 1 1 11.6 9.5v2.9a2.8 2.8 0 1 0 2.9 2.8z" fill="#fff"/></svg></button>
-                <button type="button" class="source-btn" data-source="Instagram" title="Paste an Instagram link"><svg viewBox="0 0 24 24" width="22" height="22"><defs><radialGradient id="ig-g" cx="30%" cy="107%" r="150%"><stop offset="0" stop-color="#fdf497"/><stop offset=".1" stop-color="#fdf497"/><stop offset=".5" stop-color="#fd5949"/><stop offset=".68" stop-color="#d6249f"/><stop offset="1" stop-color="#285AEB"/></radialGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig-g)"/><rect x="6.5" y="6.5" width="11" height="11" rx="3.5" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="16.4" cy="7.6" r="1" fill="#fff"/></svg></button>
-                <button type="button" class="source-btn" data-source="link" title="Paste any video link">${icon(`<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>`)}</button>
-                <label class="btn upload-file" for="file">${icon(`<path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>`, 17)} Upload file</label>
-              </div>
+              <h1>One video in. <span>Viral clips out.</span></h1>
+              <p class="lede">Drop a video or paste a link. We'll find the best moments, caption them, and get them ready to post.</p>
             </div>
             <div class="hh-art" id="hero-art" aria-hidden="true"></div>
           </div>
@@ -773,15 +766,21 @@ async function showHome() {
             <div class="upload-drop">
               <label id="dropzone" class="dropzone">
                 <input id="file" type="file" accept="video/*,.mov,.mkv,.m4v,image/*,.heic,.heif,application/pdf,.pdf" multiple hidden />
-                <div class="dz-icon">${ICON.upload}</div>
-                <div class="dz-title">Drop your videos here</div>
-                <div class="dz-sub">one or several videos · add pictures or PDFs for context · or click to browse</div>
+                <span class="dz-icon">${ICON.upload}</span>
+                <span class="dz-copy">
+                  <b>Drop videos here, or click to browse</b>
+                  <small>one or several · add pictures or PDFs for context</small>
+                </span>
               </label>
               <div id="chip" class="file-chip" hidden></div>
             </div>
             <div class="link-row">
-              <span class="link-icon">${ICON.link}</span>
-              <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="Paste a YouTube, TikTok or Instagram link…" />
+              <span class="link-sources">
+                <button type="button" class="src" data-source="YouTube" title="Paste a YouTube link"><svg viewBox="0 0 24 24" width="19" height="19"><rect x="2" y="5" width="20" height="14" rx="4.5" fill="#FF0033"/><path d="m10 9 5 3-5 3z" fill="#fff"/></svg></button>
+                <button type="button" class="src" data-source="TikTok" title="Paste a TikTok link"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.5 3h2.7a4.6 4.6 0 0 0 3.8 3.9v2.8a7.3 7.3 0 0 1-3.8-1.2v6.6A5.6 5.6 0 1 1 11.6 9.5v2.9a2.8 2.8 0 1 0 2.9 2.8z" fill="currentColor"/></svg></button>
+                <button type="button" class="src" data-source="Instagram" title="Paste an Instagram link"><svg viewBox="0 0 24 24" width="19" height="19"><defs><radialGradient id="ig-g" cx="30%" cy="107%" r="150%"><stop offset="0" stop-color="#fdf497"/><stop offset=".1" stop-color="#fdf497"/><stop offset=".5" stop-color="#fd5949"/><stop offset=".68" stop-color="#d6249f"/><stop offset="1" stop-color="#285AEB"/></radialGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig-g)"/><rect x="6.5" y="6.5" width="11" height="11" rx="3.5" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="16.4" cy="7.6" r="1" fill="#fff"/></svg></button>
+              </span>
+              <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="…or paste a YouTube, TikTok or Instagram link" />
               <button id="submit" class="btn primary" disabled>Generate clips ${icon(`<path d="M5 12h14m-5-5 5 5-5 5"/>`, 16)}</button>
             </div>
             <div id="progress" class="upload-progress" hidden><div class="bar"><i></i></div><span>0%</span></div>
@@ -858,10 +857,6 @@ function renderHeroArt(projects) {
   if (!shots.length) return art.remove();
   const lead = shots[0];
   art.innerHTML = `
-    <span class="hh-note hh-note-1">Turn this…</span>
-    <svg class="hh-arrow hh-arrow-1" viewBox="0 0 60 40"><path d="M4 8c16 2 30 10 44 24m0 0-2-11m2 11-11-2" /></svg>
-    <span class="hh-note hh-note-2">Into this.</span>
-    <svg class="hh-arrow hh-arrow-2" viewBox="0 0 40 60"><path d="M8 4c-4 18 2 34 22 48m0 0-11 1m11-1-2-11" /></svg>
     <div class="hh-stack">
       ${shots
         .slice(1)
@@ -874,7 +869,9 @@ function renderHeroArt(projects) {
         <span class="hh-play">${ICON.play}${lead.duration ? `<b>${fmt(lead.duration)}</b>` : ""}</span>
       </a>
     </div>
-    <span class="hh-pill"><i></i>Auto captions. AI clips. Ready to post.</span>`;
+    </div>`;
+  // the pill reads as a line of copy, so it belongs under the lede — not floating over the art
+  $(".hh-copy")?.insertAdjacentHTML("beforeend", `<span class="hh-pill"><i></i>Auto captions. AI clips. Ready to post.</span>`);
 }
 
 const dayLabel = (iso) => {
@@ -2569,7 +2566,7 @@ function openClipPreview(p, clip) {
   const modal = openModal(
     `
     <div class="modal-head">
-      <div><h2>${esc(clip.title)}</h2><p class="muted">Clip ${pad(clip.rank)} · ${fmtLen(clip.end - clip.start)} · ${done ? esc(r.message || "Rendered") : "Live preview — not rendered yet"}</p></div>
+      <div><h2>${esc(clip.title)}</h2><p class="muted">Clip ${pad(clip.rank)} · ${fmtLen(done && r.duration ? r.duration : clip.end - clip.start)} · ${done ? esc(r.message || "Rendered") : "Live preview — not rendered yet"}</p></div>
       <button type="button" class="icon-btn" data-close title="Close">${ICON.close}</button>
     </div>
     <div class="quick-preview" style="aspect-ratio:${aspect[0]} / ${aspect[1]}">
@@ -2650,7 +2647,7 @@ const clipItem = (p, c) => ({
   caption: c.caption,
   hashtags: c.hashtags,
   file: c.render.file,
-  duration: c.end - c.start,
+  duration: c.render.duration || c.end - c.start, // the file's own length, which timeline trims change
   score: c.score,
 });
 

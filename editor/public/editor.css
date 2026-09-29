@@ -86,6 +86,11 @@ kbd { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .eh-center { display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
 .eh-center .ibtn { width: 34px; height: 30px; }
 .eh-right { display: flex; justify-content: flex-end; gap: 8px; }
+.ve .eh-savebtn { min-width: 92px; justify-content: center; }
+.ve .eh-savebtn[data-state="saved"] { opacity: 1; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--muted); }
+.ve .eh-savebtn[data-state="rendering"], .ve .eh-savebtn[data-state="saving"] { opacity: 0.85; }
+.eh-savebtn .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.eh-savebtn .dot.pulse { animation: ve-pulse 1s var(--ease) infinite; }
 
 /* ---------- rail + assets ---------- */
 .ve-rail { grid-area: rail; display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; overflow-y: auto; border-right: 1px solid var(--ve-line); background: var(--ve-panel); scrollbar-width: none; }

@@ -15,6 +15,9 @@ const ICON = {
   doc: svg(`<path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10.5A.5.5 0 0 1 6.5 20V4a.5.5 0 0 1 .5-.5z"/><path d="M9.5 12h5M9.5 15.5h5"/>`, 14),
   stop: svg(`<rect x="7" y="7" width="10" height="10" rx="1.5"/>`, 14),
   check: svg(`<path d="M5 12.5l4.5 4.5L19 7.5"/>`, 14),
+  play: svg(`<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>`, 16),
+  playBig: svg(`<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>`, 22),
+  close: svg(`<path d="M6 6l12 12M18 6 6 18"/>`, 18),
 };
 const IDEAS = [
   "Cut every retake and flub, keep only the best takes",
@@ -30,7 +33,7 @@ const state = { config: null, ads: [], slides: [], selected: new Set(), poll: nu
 /** The batch brief and switches, remembered in this browser (a convenience; nothing depends on it). */
 function loadBatch() {
   try {
-    return { prompt: "", auto: true, save: true, ...JSON.parse(localStorage.getItem("ads.batch") || "{}") };
+    return { prompt: "", auto: true, save: true, offer: "trial", ...JSON.parse(localStorage.getItem("ads.batch") || "{}") };
   } catch {
     return { prompt: "", auto: true, save: true };
   }
@@ -65,6 +68,13 @@ const mmss = (s) => (s == null ? "–" : `${Math.floor(s / 60)}:${String(Math.ro
 const working = (ad) => ad.busy || ["waiting", "planning", "queued"].includes(ad.status);
 const idFromHash = () => (location.hash.match(/^#\/ads\/([\w-]+)/) || [])[1] || null;
 
+// The grid shows newest first, so position is no help when you want to say which video you mean.
+// Number them by when they were uploaded instead: the first one you dropped in is 1, and it stays 1.
+function adNumbers(ads) {
+  const order = [...ads].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || a.id.localeCompare(b.id));
+  return new Map(order.map((ad, i) => [ad.id, i + 1]));
+}
+
 function statusChip(ad) {
   if (ad.status === "queued" && !ad.busy) return `<span class="chip">Queued</span>`;
   if (working(ad)) return `<span class="chip live">Editing</span>`;
@@ -78,10 +88,69 @@ function statusChip(ad) {
 }
 
 // ---------------------------------------------------------------------------
+// Colour grade: the creator's two grade templates (Assets LUTs, set on the Ads page), the built-in grades, and
+// any other LUT of theirs. Dropdown values: "template:1", "grade:punchy", "lut:<id>".
+
+const gradeSlots = (cfg) => (cfg.templates || []).filter((t) => t.title);
+
+/** What the ad's grade dropdown shows: what it's graded with once edited, else the options it will be edited with. */
+function gradeValue(ad, cfg) {
+  const opts = ad.options || {};
+  const slots = gradeSlots(cfg);
+  const asLut = (id) => {
+    const slot = slots.find((t) => t.n === opts.template && t.lut === id) || slots.find((t) => t.lut === id);
+    return slot ? `template:${slot.n}` : `lut:${id}`;
+  };
+  if (ad.lutInUse) return ad.lutInUse === "none" ? `grade:${ad.grade && ad.grade !== "none" ? ad.grade : "none"}` : asLut(ad.lutInUse);
+  if (opts.lut && opts.lut !== "none") return asLut(opts.lut);
+  if (opts.template) return `template:${opts.template}`;
+  if (!opts.grade || opts.grade === "auto") return slots.length ? `template:${cfg.defaultTemplate || 1}` : "grade:auto";
+  return `grade:${opts.grade}`;
+}
+
+/** A dropdown value as the ad's grade options. */
+function gradeOptionsFrom(value) {
+  const [kind, id] = value.split(/:(.*)/);
+  if (kind === "template") return { template: Number(id), grade: "auto", lut: "none" };
+  if (kind === "lut") return { template: null, grade: "auto", lut: id };
+  return { template: null, grade: id, lut: "none" };
+}
+
+function gradeSelect(ad, cfg) {
+  const slots = gradeSlots(cfg);
+  const value = gradeValue(ad, cfg);
+  const opt = (v, label) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(label)}</option>`;
+  const inSlot = new Set(slots.map((t) => t.lut));
+  const others = (cfg.luts || []).filter((l) => !inSlot.has(l.id));
+  return `<select id="ad-grade">
+    ${slots.length ? `<optgroup label="Your templates">${slots.map((t) => opt(`template:${t.n}`, `Template ${t.n}: ${t.title}${t.n === cfg.defaultTemplate ? " (default)" : ""}`)).join("")}</optgroup>` : ""}
+    <optgroup label="Built-in grades">${slots.length ? "" : opt("grade:auto", "Auto (AI picks)")}${Object.entries(cfg.grades || {}).map(([k, label]) => opt(`grade:${k}`, label)).join("")}</optgroup>
+    ${others.length ? `<optgroup label="Your other LUTs">${others.map((l) => opt(`lut:${l.id}`, l.title)).join("")}</optgroup>` : ""}
+  </select>`;
+}
+
+/** Template 1 / Template 2 and which one new ads start on, on the Ads page. Saved for everyone (data/ads/settings.json). */
+function gradeSettings(cfg) {
+  if (!cfg.templates || !(cfg.luts || []).length) return ""; // no LUTs yet, or a server without grade templates
+  const slots = cfg.templates;
+  const lutSelect = (n) => {
+    const current = slots.find((t) => t.n === n)?.lut || "none";
+    return `<select data-grade-template="${n}"><option value="none">None</option>${cfg.luts.map((l) => `<option value="${esc(l.id)}" ${l.id === current ? "selected" : ""}>${esc(l.title)}</option>`).join("")}</select>`;
+  };
+  return `
+      <div class="ad-grade-set">
+        <label class="field"><span>Color grade: Template 1</span>${lutSelect(1)}</label>
+        <label class="field"><span>Template 2</span>${lutSelect(2)}</label>
+        <div class="field"><span>New ads use</span><div class="segmented">${[1, 2].map((n) => `<button data-default-template="${n}" class="${cfg.defaultTemplate === n ? "on" : ""}">Template ${n}</button>`).join("")}</div></div>
+      </div>`;
+}
+
+// ---------------------------------------------------------------------------
 // List view: the upload box and every ad so far.
 
 function listView() {
   const ads = state.ads;
+  const nums = adNumbers(ads);
   return `
     <div class="page-head">
       <div>
@@ -97,7 +166,7 @@ function listView() {
       <div class="ad-toggles">
         <label class="toggle"><input type="checkbox" id="ad-batch-auto" ${state.batch.auto ? "checked" : ""} /><span class="track"></span>Edit them automatically</label>
         <label class="toggle"><input type="checkbox" id="ad-batch-save" ${state.batch.save ? "checked" : ""} ${state.batch.auto ? "" : "disabled"} /><span class="track"></span>Save the videos when done</label>
-      </div>
+      </div>${gradeSettings(state.config || {})}
     </div>
     <label class="dropzone ad-drop" id="ad-drop">
       <input type="file" accept="video/*" multiple hidden id="ad-file" />
@@ -113,7 +182,7 @@ function listView() {
             .map(
               (ad) => `
         <a class="ad-card${state.selected.has(ad.id) ? " picked" : ""}" href="#/ads/${ad.id}">
-          <div class="ad-thumb"><span class="ad-pick" data-pick="${ad.id}" role="checkbox" aria-checked="${state.selected.has(ad.id)}" title="Select">${ICON.check}</span>${ad.project ? `<img src="${esc(ad.project.poster)}" alt="" loading="lazy" onerror="this.remove()" />` : ""}</div>
+          <div class="ad-thumb">${ad.video ? `<button class="ad-play" data-play="${ad.id}" title="Watch the saved video">${ICON.playBig}</button>` : ""}<span class="ad-num" title="Video ${nums.get(ad.id)} — say this number when you mean this video">${nums.get(ad.id)}</span><span class="ad-pick" data-pick="${ad.id}" role="checkbox" aria-checked="${state.selected.has(ad.id)}" title="Select">${ICON.check}</span>${ad.project ? `<img src="${esc(ad.project.poster)}" alt="" loading="lazy" onerror="this.remove()" />` : ""}</div>
           <div class="ad-card-body">
             <b>${esc(ad.name)}</b>
             <div class="ad-card-meta">${statusChip(ad)}${ad.stats ? `<span class="muted small">${mmss(ad.stats.source)} → ${mmss(ad.stats.final)}</span>` : ""}<span class="muted small">${mb(ad.sizeBytes)}</span><button class="ad-del" data-del="${ad.id}" title="Delete this ad and its video">${ICON.trash}</button></div>
@@ -130,6 +199,82 @@ function listView() {
         .join("")}
       <label class="ad-logo add ad-slide-tile"><input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden id="ad-slide-file" />+ Add slides</label>
     </div>`;
+}
+
+/** Watch the saved MP4 (the file Download gives you) in a popup: the true final, no live-preview stutter. */
+function watch(ad) {
+  if (!ad?.video) return toast("Save this ad first, then you can watch the final video.");
+  const box = document.createElement("div");
+  box.className = "ad-watch";
+  box.innerHTML = `<div class="ad-watch-card" role="dialog" aria-label="${esc(ad.name)}">
+      <div class="ad-watch-head"><b>${esc(ad.name)}</b><button class="ad-watch-x" title="Close">${ICON.close}</button></div>
+      <video src="${API}/${ad.id}/download?v=${encodeURIComponent(ad.video.at || "")}" controls autoplay playsinline></video>
+      ${ad.video.stale ? `<p class="small muted">This is the last saved version. Changes since then aren't in it until you save again.</p>` : ""}
+      <div class="ad-watch-foot"><a class="btn ghost sm" href="${API}/${ad.id}/download">${ICON.save}<span>Download</span></a></div>
+    </div>`;
+  const close = () => {
+    $("video", box)?.pause();
+    box.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => e.key === "Escape" && close();
+  box.addEventListener("click", (e) => (e.target === box || e.target.closest(".ad-watch-x")) && close());
+  document.addEventListener("keydown", onKey);
+  document.body.append(box);
+}
+
+/** The two ways an ad can end (from the server, with fallbacks so the chooser always works). */
+const OFFER_CHOICES = () => state.config?.offers || {
+  trial: { label: "ATLAS · 7-day free trial", cta: "Start Your 7 Day Free Trial" },
+  call: { label: "Book a call", cta: "Book a call" },
+};
+const OFFER_HINT = {
+  trial: "Ends on \u201cStart your 7-day free trial\u201d \u00b7 app.atlas-ai.club",
+  call: "Ends on \u201cBook your free call\u201d",
+};
+
+/**
+ * Asked every time videos are dropped in: how these ads end. Resolves with "trial" / "call", or null when cancelled.
+ * The last choice is preselected (remembered in this browser).
+ */
+function chooseOffer(count) {
+  return new Promise((resolve) => {
+    const offers = OFFER_CHOICES();
+    let pick = offers[state.batch.offer] ? state.batch.offer : "trial";
+    const box = document.createElement("div");
+    box.className = "ad-watch ad-offer";
+    const paint = () => {
+      box.innerHTML = `<div class="ad-watch-card ad-offer-card" role="dialog" aria-label="How should these ads end?">
+          <div class="ad-watch-head"><b>How should ${count === 1 ? "this ad" : `these ${count} ads`} end?</b><button class="ad-watch-x" data-offer-cancel title="Cancel">${ICON.close}</button></div>
+          <div class="ad-offer-list">${Object.entries(offers).map(([k, o]) => `<button class="ad-offer-opt${k === pick ? " on" : ""}" data-offer="${k}" aria-pressed="${k === pick}"><b>${esc(o.label)}</b><span class="muted small">${esc(OFFER_HINT[k] || o.cta)}</span></button>`).join("")}</div>
+          <p class="muted small">Every CTA, end card and closing line sells this one offer. You can change it per ad later.</p>
+          <div class="ad-offer-foot"><button class="btn ghost" data-offer-cancel>Cancel</button><button class="btn primary" data-offer-go>${ICON.upload}<span>Upload ${count === 1 ? "video" : `${count} videos`}</span></button></div>
+        </div>`;
+    };
+    const done = (v) => {
+      box.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(null);
+      if (e.key === "Enter") done(pick);
+    };
+    box.addEventListener("click", (e) => {
+      const opt = e.target.closest("[data-offer]");
+      if (opt) {
+        pick = opt.dataset.offer;
+        paint();
+        return;
+      }
+      if (e.target.closest("[data-offer-go]")) done(pick);
+      else if (e.target === box || e.target.closest("[data-offer-cancel]")) done(null);
+    });
+    document.addEventListener("keydown", onKey);
+    paint();
+    document.body.append(box);
+    $("[data-offer-go]", box)?.focus();
+  });
 }
 
 /** Select all / some ads, then download (one zip) or delete them together. */
@@ -213,6 +358,12 @@ async function deleteAd(ad) {
 function bindList() {
   bindDrop();
   root.onclick = async (e) => {
+    const play = e.target.closest("[data-play]");
+    if (play) {
+      e.preventDefault();
+      e.stopPropagation();
+      return watch(state.ads.find((a) => a.id === play.dataset.play));
+    }
     const pick = e.target.closest("[data-pick]");
     if (pick) {
       e.preventDefault();
@@ -259,6 +410,19 @@ function bindList() {
     saveBatch();
   });
   $("#ad-batch-save", root).addEventListener("change", (e) => ((state.batch.save = e.target.checked), saveBatch()));
+  const saveGrades = async (body) => {
+    try {
+      Object.assign(state.config, await api("/settings", { method: "PUT", body }));
+      $$("[data-default-template]", root).forEach((b) => b.classList.toggle("on", Number(b.dataset.defaultTemplate) === state.config.defaultTemplate));
+      toast("Color grade templates saved.");
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+  $$("[data-grade-template]", root).forEach((sel) =>
+    sel.addEventListener("change", () => saveGrades({ gradeTemplates: $$("[data-grade-template]", root).map((x) => x.value) })),
+  );
+  $$("[data-default-template]", root).forEach((b) => b.addEventListener("click", () => saveGrades({ defaultTemplate: Number(b.dataset.defaultTemplate) })));
 }
 
 /** Send one file to /api/projects (transcribe only), reporting progress. Resolves with the new project. */
@@ -287,6 +451,10 @@ function sendFile(file, onPct) {
  */
 async function uploadAll(files) {
   if (state.uploading || !files.length) return;
+  const offer = await chooseOffer(files.length);
+  if (!offer) return;
+  state.batch.offer = offer;
+  saveBatch();
   const { auto, save, prompt } = state.batch;
   let last = null;
   let done = 0;
@@ -302,8 +470,8 @@ async function uploadAll(files) {
           bar.parentNode.nextElementSibling.textContent = `${pct}%`;
         }
       });
-      last = await api("/", { method: "POST", body: { projectId: project.id, name: file.name, aspect: "9:16" } });
-      if (auto) await api(`/${last.id}/edit`, { method: "POST", body: { prompt, aspect: "9:16", options: { grade: "auto", lut: "none" }, autoSave: save } });
+      last = await api("/", { method: "POST", body: { projectId: project.id, name: file.name, aspect: "9:16", options: { offer } } });
+      if (auto) await api(`/${last.id}/edit`, { method: "POST", body: { prompt, aspect: "9:16", options: { grade: "auto", lut: "none", offer }, autoSave: save } });
       done++;
     } catch (err) {
       toast(`${file.name}: ${err.message}`);
@@ -323,13 +491,12 @@ async function uploadAll(files) {
 
 function adView(ad) {
   const cfg = state.config || {};
+  const num = adNumbers(state.ads).get(ad.id);
   const opts = ad.options || {};
   const processing = ad.project && ad.project.status !== "ready" && ad.project.status !== "error";
   const busy = working(ad);
   const ready = ad.status === "ready" && !busy;
   const [aw, ah] = (ad.aspect || "9:16").split(":").map(Number);
-  const gradeOptions = [["auto", (cfg.luts || []).length ? "Auto (your LUT)" : "Auto (AI picks)"], ...Object.entries(cfg.grades || {})].map(([k, label]) => `<option value="${k}" ${!opts.lut || opts.lut === "none" ? (opts.grade === k ? "selected" : "") : ""}>${esc(label)}</option>`).join("");
-  const lutOptions = (cfg.luts || []).map((l) => `<option value="lut:${esc(l.id)}" ${opts.lut === l.id ? "selected" : ""}>My LUT: ${esc(l.title)}</option>`).join("");
   const s = ad.stats;
 
   let stage;
@@ -344,7 +511,7 @@ function adView(ad) {
     <a class="back" href="#/ads">${ICON.back} All ads</a>
     <div class="page-head ad-head">
       <div>
-        <h1 contenteditable="plaintext-only" spellcheck="false" id="ad-name" title="Rename">${esc(ad.name)}</h1>
+        <div class="ad-title-row">${num ? `<span class="ad-num head" title="Video ${num}">${num}</span>` : ""}<h1 contenteditable="plaintext-only" spellcheck="false" id="ad-name" title="Rename">${esc(ad.name)}</h1></div>
         <p class="muted">${ad.project?.duration ? `${mmss(ad.project.duration)} of footage` : "Uploading footage"}${processing ? ` · ${esc(ad.project.message || "processing")}` : ""}</p>
       </div>
       <div class="head-actions">${statusChip(ad)}<button class="btn ghost sm" data-act="delete" title="Delete this ad and its video">${ICON.trash}</button></div>
@@ -359,9 +526,9 @@ function adView(ad) {
         ${ready ? `
         <div class="ad-actions">
           ${ad.video && !ad.rendering && ad.video.stale
-            ? `<button class="btn primary" data-act="save">${ICON.save} Save the latest version</button><a class="btn" href="${esc(ad.video.download)}">Download older save</a>`
+            ? `<button class="btn primary" data-act="save">${ICON.save} Save the latest version</button><a class="btn" href="${esc(ad.video.download)}">Download older save</a><button class="btn" data-act="watch">${ICON.play} Watch saved</button>`
             : ad.video && !ad.rendering
-            ? `<a class="btn primary" href="${esc(ad.video.download)}">${ICON.save} Download video</a><button class="btn" data-act="save">Save again</button>`
+            ? `<a class="btn primary" href="${esc(ad.video.download)}">${ICON.save} Download video</a><button class="btn" data-act="watch">${ICON.play} Watch final video</button><button class="btn" data-act="save">Save again</button>`
             : ad.rendering
               ? `<div class="ad-render"><div class="ad-bar"><i style="width:${ad.render?.progress || 3}%"></i></div><span class="muted small">${esc(ad.render?.message || "Saving…")}</span><button class="btn ghost sm" data-act="cancel">${ICON.stop} Stop</button></div>`
               : `<button class="btn primary" data-act="save">${ICON.save} Save video</button>`}
@@ -374,7 +541,7 @@ function adView(ad) {
           <label class="field"><span>${ready ? "Want changes? Describe the new edit" : "What should this ad do?"}</span>
             <textarea id="ad-prompt" rows="5" placeholder="e.g. Problem-aware ad for chiropractors. Cut all the retakes, keep it under 35s, pop up the numbers, end with 'Book a free strategy call'." ${busy ? "disabled" : ""}>${esc(ad.prompt || "")}</textarea>
           </label>
-          <p class="muted small">Always applied: cut every retake, under 30 s, big numbers, a checklist of the 3 main points, the strongest hook first, and a "Book your free call" CTA. Sound effects, music and captions start on.</p>
+          <p class="muted small">Always applied: cut every retake, under 30 s, big numbers, a checklist of the 3 main points, the strongest hook first, and an ending that sells the offer below. Sound effects, music and captions start on.</p>
           <div class="ad-ideas">${IDEAS.map((i) => `<button class="chip chip-link" data-idea="${esc(i)}" ${busy ? "disabled" : ""}>+ ${esc(i)}</button>`).join("")}</div>
           <div class="field ad-logos"><span>Brand logos <em>— when the brand is named, its logo pops up</em></span>
             <div class="ad-logo-row">
@@ -384,7 +551,8 @@ function adView(ad) {
           </div>
           <div class="ad-opts">
             <div class="field"><span>Format</span><div class="segmented" data-seg="aspect">${Object.entries(cfg.aspects || { "9:16": "" }).map(([k, hint]) => `<button data-aspect="${k}" class="${ad.aspect === k ? "on" : ""}" title="${esc(hint)}">${k}</button>`).join("")}</div></div>
-            <label class="field"><span>Color grade</span><select id="ad-grade">${gradeOptions}${lutOptions}</select></label>
+            <label class="field"><span>Color grade</span>${gradeSelect(ad, cfg)}</label>
+            <label class="field"><span>Ending</span><select id="ad-offer">${Object.entries(OFFER_CHOICES()).map(([k, o]) => `<option value="${k}" ${(opts.offer || "trial") === k ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
           </div>
           <div class="ad-toggles">
             <label class="toggle"><input type="checkbox" data-opt="sfx" ${opts.sfx !== false ? "checked" : ""} /><span class="track"></span>Sound effects</label>
@@ -449,15 +617,32 @@ function bindAd(ad) {
     }),
   );
 
+  // A finished ad changes grade on the spot: only the colour changes, the edit stays as it is.
+  $("#ad-grade", root)?.addEventListener("change", async (e) => {
+    if (ad.status !== "ready" || working(ad)) return;
+    const select = e.target;
+    select.disabled = true;
+    toast("Changing the color grade…");
+    try {
+      await api(`/${ad.id}/grade`, { method: "POST", body: { options: gradeOptionsFrom(select.value) } });
+      toast(ad.video ? "Grade changed. Save the video again to bake it in." : "Grade changed.");
+      await refresh(true);
+    } catch (err) {
+      toast(err.message);
+      select.disabled = false;
+    }
+  });
+
   root.onclick = async (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) return;
+    if (act === "watch") return watch(ad);
     try {
       if (act === "edit") {
         if (ad.handEdited && !confirm("You've edited this ad in the timeline. Re-editing rebuilds it from scratch (your version is backed up first). Continue?")) return;
-        const grade = $("#ad-grade", root).value;
-        const options = { grade: grade.startsWith("lut:") ? "auto" : grade, lut: grade.startsWith("lut:") ? grade.slice(4) : "none" };
+        const options = gradeOptionsFrom($("#ad-grade", root).value);
         $$("[data-opt]", root).forEach((t) => (options[t.dataset.opt] = t.checked));
+        options.offer = $("#ad-offer", root)?.value || "trial";
         await api(`/${ad.id}/edit`, { method: "POST", body: { prompt: prompt.value, aspect, options } });
         toast("Editing your ad…");
       }

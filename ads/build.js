@@ -11,8 +11,8 @@ import { clipMusic, subtractRanges } from "../lib/clipplan.js";
 import { formatMoney } from "../lib/money.js";
 import { tightenClip } from "../lib/tighten.js";
 import { DATA_DIR as EDITOR_DIR } from "../editor/media.js";
-import { CTA_CLICK, GRADES, LOOKS, SFX, listTimes, parseStat, statCount } from "./graphics.js";
-import { TEMPLATES } from "./templates/index.js";
+import { CTA_CLICK, GRADES, LOOKS, SFX, TRANSITIONS, listTimes, parseStat, statCount } from "./graphics.js";
+import { TEMPLATES, templateSfx } from "./templates/index.js";
 
 export const AD_CLIP = "ad";
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -35,8 +35,41 @@ const HIT_SFX = {
   whip: [["swoosh", 0.12, 0.5]],
   flash: [["bigswoosh", 0.05, 0.4]],
   bw: [["slice", 0, 0.4]],
-  rgb: [["glitch-1", 0, 0.3]],
+  rgb: [["air", 0, 0.3]],
 };
+
+/**
+ * Never in an ad (the creator): the glitch sounds clash (2026-09-28), and no voice effect at all: underwater "takes the
+ * words away" (2026-09-28) and muffle made "the guy's voice go off" (2026-09-29), so the voice always plays clean.
+ * They all still exist for the rest of the app (edits/sfx, ads/voicefx.js); the Ads Editor just never uses them.
+ */
+export const BANNED_SFX = new Set(["glitch-1", "glitch-2"]);
+export const BANNED_VOICEFX = new Set(["underwater", "muffle", "phone"]);
+
+/**
+ * Ad mix levels (the creator, 2026-09-28: "turn down the music a tiny bit and the sound effects a bit more").
+ * The music bed sits at 0.112 (the house bed is 0.13, about 1.3 dB quieter); every sound effect is scaled by 0.7.
+ */
+export const AD_MUSIC_LEVEL = 0.112;
+export const AD_SFX_GAIN = 0.7;
+
+/**
+ * The loudness guard (the creator, 2026-09-28: "the swoosh sounds are too loud… make sure the background noises are not
+ * louder than the music"). Every sound effect's volume is capped from its file's measured loudness (its loudest
+ * 400 ms, LUFS), so what it adds to the mix is known, not guessed:
+ *   - whooshes, swooshes, air and risers never play louder than the music bed;
+ *   - everything else (clicks, pops, dings, hits) stays at least 12 dB under the voice.
+ * Levels measured going into the mix: the cleaned voice ~-12.5 LUFS, the bed ~-13.5 LUFS scaled by its level (-32.5
+ * at 0.112). The renderer plays effects at 0.8 of their clip volume (ads/graphics.js).
+ */
+export const AMBIENT_SFX = new Set(["whoosh", "whoosh-short", "whoosh-cinematic", "swoosh", "bigswoosh", "air", "revswell", "riser", "atlas-whoosh", "atlas-riser"]);
+const VOICE_LUFS = -12.5;
+const MUSIC_LUFS = -13.5 + 20 * Math.log10(AD_MUSIC_LEVEL);
+export function sfxCap(name, loudness) {
+  if (!Number.isFinite(loudness)) return Infinity;
+  const target = AMBIENT_SFX.has(name) ? MUSIC_LUFS : VOICE_LUFS - 12;
+  return 10 ** ((target - loudness) / 20) / 0.8;
+}
 
 export const PALETTES = {
   classic: {},
@@ -46,17 +79,18 @@ export const PALETTES = {
 
 /** Automatic sound design per graphic: [sound, offset from the graphic's start, volume]. */
 const GRAPHIC_SFX = {
-  headline: [["whoosh-short", -0.05, 0.45]],
+  // Soft UI sounds to match the minimal motion (ads/references/atlas-motion-kit.md): air, ticks and pings, no pops.
+  headline: [["air", -0.05, 0.3]],
   stat: [],
-  list: [["whoosh", -0.05, 0.35]],
-  compare: [["whoosh", -0.05, 0.35]],
-  "lower-third": [["whoosh", 0, 0.35]],
-  callout: [["pop", 0, 0.55]],
-  proof: [["pop", 0.1, 0.5]],
-  slide: [["whoosh", 0, 0.4]],
-  check: [["whoosh-short", 0.05, 0.35], ["pop", 0.68, 0.6]],
-  icon: [["pop", 0.05, 0.5]],
-  cta: [["whoosh-short", 0.1, 0.4], ["click", CTA_CLICK, 0.9]],
+  list: [["air", -0.05, 0.3]],
+  compare: [["air", -0.05, 0.3]],
+  "lower-third": [["air", 0, 0.3]],
+  callout: [["ping", 0.1, 0.35]],
+  proof: [["ping", 0.15, 0.35]],
+  slide: [["air", 0, 0.3]],
+  check: [["air", 0.05, 0.25], ["chirp", 0.68, 0.4]],
+  icon: [["ping", 0.1, 0.35]],
+  cta: [["air", 0.1, 0.3], ["click", CTA_CLICK, 0.8]],
 };
 
 /** A testimonial moment: the member's line and name from data/ads/testimonials.json. */
@@ -119,13 +153,51 @@ export function trimStretchedWords(words, levels) {
   });
 }
 
-/** Runs of speech (voice above −32 dB for 60 ms+, gaps under 150 ms bridged) between two times, from the 10 ms levels. */
+/**
+ * A word's end pushed out to where its sound really stops. Transcripts often end a word early, and a cut placed on that
+ * timing clips its tail (the creator, 2026-09-28: "he said humans, it cut the word so fast"). While the voice stays
+ * above the room's noise floor (+8 dB, at least −42 dB) right after the word, its end follows, up to 0.35 s and never
+ * into the next word.
+ */
+export function extendWordTails(words, levels) {
+  if (!levels?.length) return words;
+  const sorted = Array.from(levels).filter((v) => v > -90).sort((a, b) => a - b);
+  const floor = sorted.length ? sorted[Math.floor(sorted.length * 0.15)] : -60;
+  const threshold = Math.max(-42, floor + 8);
+  return words.map((w, i) => {
+    const next = words[i + 1];
+    const limit = Math.min(w.end + 0.35, next ? next.start - 0.03 : w.end + 0.35);
+    let end = w.end;
+    let quiet = 0;
+    for (let j = Math.round(w.end / 0.01); j * 0.01 <= limit && j < levels.length; j++) {
+      if (levels[j] > threshold) {
+        end = j * 0.01 + 0.01;
+        quiet = 0;
+      } else if (++quiet >= 4) break;
+    }
+    return end > w.end + 0.015 ? { ...w, end: r3(end), tail: true } : w;
+  });
+}
+
+/**
+ * The level that counts as voice for this recording: 10 dB over its room tone (the 15th-percentile level), kept
+ * between −44 and −28 dB. −32 on a typical recording; a quiet room or a soft speaker moves it with them.
+ */
+let VOICE_DB = -32;
+export function voiceThreshold(levels) {
+  if (!levels?.length) return -32;
+  const sorted = Array.from(levels).filter((v) => v > -90).sort((a, b) => a - b);
+  const floor = sorted.length ? sorted[Math.floor(sorted.length * 0.15)] : -42;
+  return Math.max(-44, Math.min(-28, floor + 10));
+}
+
+/** Runs of speech (voice above the recording's threshold for 60 ms+, gaps under 150 ms bridged) between two times. */
 function speechBursts(levels, from, to) {
   const out = [];
   let run = null;
   for (let i = Math.max(0, Math.round(from / 0.01)); i <= Math.min(levels.length - 1, Math.round(to / 0.01)); i++) {
     const t = i * 0.01;
-    if (levels[i] > -32) {
+    if (levels[i] > VOICE_DB) {
       if (run && t - run.end <= 0.15) run.end = t + 0.01;
       else out.push((run = { start: t, end: t + 0.01 }));
     }
@@ -182,27 +254,41 @@ function speechOnly(ranges, words, levels = null, exclude = []) {
     else out.push({ ...b });
     return out;
   }, []);
+  // Only sustained voice counts (runs of 0.15 s+ once pauses under 0.2 s are bridged): a click, a breath or a shuffle
+  // in the silence before a take is noise, and must never anchor a word onto that silence (the creator, 2026-09-28:
+  // an ad opened on four seconds of the speaker standing there because the first words were timed onto two blips).
+  const sustained = (from, to) => groups(speechBursts(levels, from - 0.3, to + 0.3))
+    .filter((g) => g.end - g.start >= 0.15)
+    .map((g) => ({ start: Math.max(g.start, from), end: Math.min(g.end, to) }))
+    .filter((g) => g.end > g.start);
+  let voicedTake = false;
   const audible = (w, edge = null) => {
     if (!levels) return w;
-    let bursts = speechBursts(levels, w.start, w.end);
+    let bursts = sustained(w.start, w.end);
     if (edge) {
-      // Look half a second past the word's timing too: its real sound may start (or end) just outside it.
-      const g = groups(edge === "first" ? speechBursts(levels, w.start, w.end + 0.5) : speechBursts(levels, w.start - 0.5, w.end));
+      // Look half a second past the word's timing too: its real sound may start (or end) just outside it. The last
+      // word may also run past its timing (its tail), up to 0.35 s.
+      const g = edge === "first" ? sustained(w.start, w.end + 0.5) : sustained(w.start - 0.5, w.end + 0.35);
       const pick = edge === "first" ? g.filter((x) => x.start <= w.end + 0.15).at(-1) : g.find((x) => x.end >= w.start - 0.15);
-      if (pick) return edge === "first" ? { start: Math.max(w.start, pick.start - 0.05), end: Math.max(pick.start + 0.15, Math.min(w.end, pick.end) + 0.06) } : { start: Math.min(pick.end - 0.15, Math.max(w.start, pick.start) - 0.05), end: Math.min(w.end, pick.end + 0.06) };
+      if (pick) return edge === "first" ? { start: Math.max(w.start, pick.start - 0.05), end: Math.max(pick.start + 0.15, Math.min(w.end, pick.end) + 0.06) } : { start: Math.min(pick.end - 0.15, Math.max(w.start, pick.start) - 0.05), end: Math.min(w.end + 0.35, pick.end + 0.06) };
     }
     if (!bursts.length) {
       // No voice at all where the word is timed: it's timed onto the silence before it. It's the next burst.
-      const next = speechBursts(levels, w.end, w.end + 1.6)[0];
-      return next ? { start: next.start - 0.05, end: Math.min(next.end, next.start + Math.max(0.2, w.end - w.start)) + 0.06 } : w;
+      const next = sustained(w.end, w.end + 1.6)[0];
+      if (next) return { start: next.start - 0.05, end: Math.min(next.end, next.start + Math.max(0.2, w.end - w.start)) + 0.06 };
+      // Still nothing: in a take that has real voice elsewhere, this word's timing is silence, so it keeps nothing
+      // (its sound is inside a neighbour's). With no voice anywhere (levels unreliable), it keeps its timing.
+      return voicedTake ? null : w;
     }
     return { start: Math.max(w.start, bursts[0].start - 0.05), end: Math.min(w.end, bursts.at(-1).end + 0.06) };
   };
   const out = [];
   for (const r of ranges) {
     const inTake = words.filter((w) => w.end > r.start + 0.02 && w.start < r.end - 0.02);
+    voicedTake = Boolean(levels) && sustained(r.start, r.end).length > 0;
     const spans = inTake
       .map((w, i) => audible(w, i === 0 ? "first" : i === inTake.length - 1 ? "last" : null))
+      .filter(Boolean)
       .map((w) => ({ start: Math.max(r.start, w.start - 0.06), end: Math.min(r.end, w.end + 0.12) }))
       .sort((a, b) => a.start - b.start);
     // A gap that holds real speech the transcript missed ("for health|care") is kept whole, never cut: only true
@@ -216,7 +302,7 @@ function speechOnly(ranges, words, levels = null, exclude = []) {
     }
     // Stretches the listen-back found silent in the finished ad come out too.
     // Stretches the listen-back found silent come out too, and a leftover sliver that holds no word is noise.
-    const timed = inTake.map((w, i) => audible(w, i === 0 ? "first" : i === inTake.length - 1 ? "last" : null));
+    const timed = inTake.map((w, i) => audible(w, i === 0 ? "first" : i === inTake.length - 1 ? "last" : null)).filter(Boolean);
     const pieces = subtractRanges(merged, exclude)
       .map((p) => ({ start: r3(p.start), end: r3(p.end) }))
       .filter((p) => p.end - p.start >= 0.15 && timed.some((w) => (w.start + w.end) / 2 > p.start && (w.start + w.end) / 2 < p.end));
@@ -268,11 +354,210 @@ function keepRanges(plan, words, levels = null) {
 }
 
 /**
+ * No stray slivers (the creator, 2026-09-29: an ad ended on a 0.23 s flash of a later take). A piece under 0.35 s that
+ * holds no whole word is noise from the cut, not part of the ad, wherever it sits.
+ */
+export function dropSlivers(pieces, words) {
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const p = pieces[i];
+    if (pieces.length > 1 && p.end - p.start < 0.35 && !words.some((w) => w.start >= p.start - 0.02 && w.end <= p.end + 0.02)) pieces.splice(i, 1);
+  }
+  return pieces;
+}
+
+/**
+ * No cut edge lands inside a word that was left out (the creator, 2026-09-29: half a "You're" was heard before a jump
+ * because the kept word's padding ran on into it). A piece that ends inside a dropped word ends just before it; one
+ * that starts inside a dropped word starts just after it. Kept words are never cut into.
+ */
+export function clearDroppedWords(pieces, all, kept) {
+  const keep = new Set(kept);
+  const keptKey = new Set(kept.map((w) => `${w.text}@${Math.round(w.start * 20)}`));
+  const dropped = all.filter((w) => !keep.has(w) && !keptKey.has(`${w.text}@${Math.round(w.start * 20)}`) && w.end - w.start >= 0.05);
+  for (const p of pieces) {
+    const inP = kept.filter((w) => w.end > p.start + 0.02 && w.start < p.end - 0.02);
+    for (const d of dropped) {
+      if (d.start > p.start + 0.05 && p.end > d.start + 0.01 && p.end < d.end + 0.1) {
+        const lastKept = inP.filter((w) => w.start < d.start).at(-1);
+        p.end = r3(Math.max(d.start - 0.02, lastKept ? lastKept.start + 0.1 : p.start + 0.15));
+      }
+      if (d.end < p.end - 0.05 && p.start < d.end - 0.01 && p.start > d.start - 0.1) {
+        const firstKept = inP.find((w) => w.end > d.end);
+        p.start = r3(Math.min(d.end + 0.02, firstKept ? firstKept.end - 0.1 : p.end - 0.15));
+      }
+    }
+  }
+  return pieces;
+}
+
+/**
+ * A stray fragment before the real start (the creator, 2026-09-29: an ad opened on the tail of an earlier take, then
+ * jumped): a first piece under 1 s, holding at most two words, followed by a jump forward in the footage.
+ */
+export function dropLeadIsland(pieces, words) {
+  while (pieces.length > 1) {
+    const [a, b] = pieces;
+    const held = words.filter((w) => w.start >= a.start - 0.02 && w.start < a.end).length;
+    if (a.end - a.start < 1.0 && held <= 2 && b.start - a.end > 0.5) pieces.shift();
+    else break;
+  }
+  return pieces;
+}
+
+/** Normalised word for matching takes. */
+const wordKey = (w) => String(w?.text || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/**
+ * Lines the plan kept twice (the creator, 2026-09-29: "he did a retake but it added both of them… always take the best
+ * one"): in play order, when four words in a row come back later (or a call to action like "click below" is said
+ * again), the earlier saying is a retake. It goes from where the repeat starts to the end of its clause (the next
+ * pause, comma or full stop), at most 14 words. The last take is the keeper.
+ * → [{ start, end, words[] }] source spans to cut
+ */
+export function retakeSpans(ranges, words) {
+  const seen = new Set();
+  const take = [];
+  const order = ranges.flatMap((r, ri) => words.filter((w) => w.end > r.start + 0.02 && w.start < r.end - 0.02 && !seen.has(w) && seen.add(w)).sort((a, b) => a.start - b.start).map((w) => (take.push(ri), w)));
+  const keys = order.map(wordKey);
+  const cut = new Set();
+  const CTA_PHRASES = [["click", "below"], ["link", "below"], ["comment", "below"], ["learn", "more"], ["free", "trial"], ["book", "a", "call"]];
+  const repeatAt = (i) => {
+    for (const p of CTA_PHRASES) {
+      if (p.every((k, j) => keys[i + j] === k)) {
+        for (let m = i + p.length; m + p.length <= keys.length; m++) if (p.every((k, j) => keys[m + j] === k)) return p.length;
+      }
+    }
+    if (i + 4 > keys.length || keys.slice(i, i + 4).some((k) => !k)) return 0;
+    // Four words said again in another take is a retake; inside one take it's rhetoric ("You don't need to learn how
+    // to code. You don't need to learn any technicalities.") and stays.
+    const four = keys.slice(i, i + 4).join(" ");
+    for (let m = i + 4; m + 4 <= keys.length; m++) if (take[m] !== take[i] && keys.slice(m, m + 4).join(" ") === four) return 4;
+    return 0;
+  };
+  for (let i = 0; i < order.length; i++) {
+    const n = repeatAt(i);
+    if (!n) continue;
+    // The earlier saying runs to the end of its clause.
+    let j = i;
+    while (j < order.length - 1 && j - i < 9 && take[j + 1] === take[i] && !/[.?!,;]$/.test(String(order[j].text)) && order[j + 1].start - order[j].end < 0.45) j++;
+    for (let k = i; k <= j; k++) cut.add(order[k]);
+    i = j;
+  }
+  // Contiguous runs of cut words (in source time) become spans.
+  const spans = [];
+  for (const w of [...cut].sort((a, b) => a.start - b.start)) {
+    const last = spans.at(-1);
+    if (last && w.start - last.end < 0.3) {
+      last.end = w.end;
+      last.words.push(w);
+    } else spans.push({ start: w.start, end: w.end, words: [w] });
+  }
+  return spans.map((x) => ({ ...x, start: r3(x.start - 0.04), end: r3(x.end + 0.06) }));
+}
+
+/** Sign-offs after a call to action that the ad doesn't need ("see you inside", "your choice", "let's go"). */
+const SIGNOFF_RE = /^(see you|your choice|let'?s go|talk soon|thank you|thanks|it'?s going to change|so i encourage|i'?ll see you)/i;
+
+/** The word a call to action ends on ("…free trial", "…click below", "…learn more", "…book a call"). */
+const CTA_END = /^(trial|trail|below|more|call|link|comment|bio|started|access|free|today|now)[.,!?]*$/i;
+
+/** A call-to-action sentence: what the ad ends on (the free trial, the call, "click below"…). */
+export const CTA_RE = /\b(free trial|trial|below|link|comment|book(?:ed|ing)?|sign up|get started|dm|learn more|find out|try it|check it out|see how|get access|join)\b/i;
+
+/**
+ * The ad ends on its call to action (the creator, 2026-09-29: "it should've stopped right after he says start free
+ * trial… don't leave extra stuff"). The last CTA sentence in the final stretch of the cut is found, and everything
+ * after it ("See you inside.", "Your choice.", a stray sliver of a later take) comes out; its last word keeps 0.4 s of
+ * air (never into the next word). Pieces are source ranges in play order; words carry source times.
+ */
+export function endOnCta(pieces, words, levels = null, planWords = null) {
+  if (!pieces.length) return pieces;
+  const kept = [];
+  pieces.forEach((p, pi) => words.forEach((w) => { if (w.start >= p.start - 0.05 && w.start < p.end - 0.02) kept.push({ w, pi }); }));
+  const total = pieces.reduce((t, p) => t + p.end - p.start, 0);
+  let played = 0;
+  const startOf = pieces.map((p) => { const at = played; played += p.end - p.start; return at; });
+  const outAt = (k) => startOf[kept[k].pi] + (kept[k].w.end - pieces[kept[k].pi].start);
+  // Sentences over the kept words; the last one with a CTA in the final 45% of the ad, with at most 5 s after it.
+  let from = 0;
+  let pick = -1;
+  kept.forEach(({ w }, k) => {
+    if (!/[.?!]$/.test(String(w.text)) && k < kept.length - 1) return;
+    const text = kept.slice(from, k + 1).map((x) => x.w.text).join(" ");
+    if (CTA_RE.test(text) && outAt(k) > total * 0.55) pick = k;
+    from = k + 1;
+  });
+  if (pick < 0 || total - outAt(pick) > 5) return pieces;
+  // A sign-off run on inside the same sentence ("click below see you inside") ends the ad before it starts.
+  for (let i = pick; i > 0 && !/[.?!]$/.test(String(kept[i - 1].w.text)); i--) {
+    const rest = kept.slice(i, pick + 1).map((x) => x.w.text).join(" ");
+    if (SIGNOFF_RE.test(rest) && CTA_RE.test(kept.slice(0, i).slice(-8).map((x) => x.w.text).join(" "))) pick = i - 1;
+  }
+  // Within that sentence it ends on the last call-to-action word ("…seven day free trial" | "or decide to be left
+  // behind", "…free trial," | "Atlas is going to change your life"), unless what follows is itself a call to action
+  // ("…and learn more") — checked against both transcripts, since a re-transcribed take can miss words.
+  let s0 = pick;
+  while (s0 > 0 && !/[.?!]$/.test(String(kept[s0 - 1].w.text))) s0--;
+  const ctaEnd = [];
+  for (let i = s0; i <= pick; i++) if (CTA_END.test(String(kept[i].w.text)) && CTA_RE.test(kept.slice(Math.max(s0, i - 3), i + 1).map((x) => x.w.text).join(" "))) ctaEnd.push(i);
+  const last = ctaEnd.at(-1);
+  if (last !== undefined && last < pick) {
+    const tailFrom = kept[last].w.end - 0.05;
+    const heardAfter = [...kept.slice(last + 1, pick + 1).map((x) => x.w), ...(planWords || []).filter((p) => p.start > tailFrom && p.start < pieces[kept[pick].pi].end)];
+    if (!CTA_RE.test(heardAfter.map((x) => x.text).join(" "))) pick = last;
+  }
+  const { w, pi } = kept[pick];
+  // Never into the next word said: the next kept word, or the next word in the long transcript (a re-transcribed
+  // take can stretch "below." over an untranscribed "see you").
+  // (The long transcript's timing drifts, so its words that are part of the CTA sentence itself don't count.)
+  const said = new Set(kept.slice(s0, pick + 1).map((x) => wordKey(x.w)));
+  const planNext = (planWords || []).find((p) => p.start > w.start + 0.05 && !said.has(wordKey(p)));
+  const nextKept = kept[pick + 1]?.pi === pi ? kept[pick + 1].w.start - 0.02 : Infinity;
+  const nextPlan = planNext && planNext.start > w.start + 0.15 ? planNext.start - 0.02 : Infinity;
+  let end = Math.min(pieces[pi].end, w.end + 0.4, nextKept, nextPlan);
+  // The last word keeps its whole sound: while the voice carries on straight after it (gaps under 0.15 s), up to
+  // 0.35 s, but never into the next word the long transcript heard.
+  if (levels) {
+    const run = speechBursts(levels, w.start, w.end + 0.6).filter((b) => b.start <= end + 0.05).at(-1);
+    if (run) end = Math.max(end, Math.min(run.end + 0.06, w.end + 0.35, nextPlan, pieces[pi].end));
+  }
+  pieces[pi].end = r3(Math.max(w.start + 0.15, end));
+  pieces.length = pi + 1;
+  // Words left after the end come out of the word list too (no caption flash of "Just" at the last frame).
+  for (let i = words.length - 1; i >= 0; i--) {
+    const x = words[i];
+    const playsElsewhere = pieces.some((p, k) => k !== pi && x.start >= p.start - 0.02 && x.start < p.end);
+    if (x.start >= pieces[pi].end - 0.05 && x.start < pieces[pi].end + 1 && x.start > w.start && !playsElsewhere) words.splice(i, 1);
+  }
+  return pieces;
+}
+
+/**
+ * The ad ends when the voice does (the creator, 2026-09-29: two ads ran a second or two past "…learn more." with the
+ * speaker just standing there). Word timings can run half a second late, so the last piece is cut 0.3 s after the last
+ * moment the raw recording has voice in it (above this recording's voice threshold), whatever the transcript says.
+ */
+export function endOnVoice(pieces, levels) {
+  const last = pieces.at(-1);
+  if (!last || !levels?.length) return pieces;
+  let voiced = -1;
+  for (let i = Math.min(levels.length - 1, Math.round(last.end / 0.01)); i >= Math.round(last.start / 0.01); i--) {
+    if (levels[i] > VOICE_DB) {
+      voiced = i * 0.01 + 0.01;
+      break;
+    }
+  }
+  if (voiced > last.start && last.end - voiced > 0.3) last.end = r3(voiced + 0.3);
+  return pieces;
+}
+
+/**
  * Build the editor document for an ad.
  * @returns { doc, duration, stats }
  */
 export async function buildAdDocument({ project, plan, words, aspect, options = {}, sfxDuration, levels = null, realign = null }) {
   words = [...words]; // keepRanges may re-time mistimed edge words onto their real sound
+  VOICE_DB = voiceThreshold(levels);
   const n = words.length;
   const ranges = keepRanges(plan, words, levels);
   // Long-video word timings drift by up to a second; each kept take re-transcribed on its own is exact. Its words
@@ -280,6 +565,19 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const planWords = words;
   if (realign) words = await realign(ranges, words);
   else words = trimStretchedWords(words, levels);
+  // Word ends follow their sound (never clipped early), and each take's cut end covers its last word's tail.
+  words = extendWordTails(words, levels);
+  const timedWords = words;
+  for (const [i, r] of ranges.entries()) {
+    const inside = words.filter((w) => w.start < r.end - 0.02 && w.end > r.start);
+    const tail = Math.max(...inside.map((w) => w.end), -Infinity);
+    const nextStart = ranges[i + 1]?.start ?? Infinity;
+    // …but never into the next word said after the take (ad #3 ran on into "It's going to" after "free trial.").
+    const lastIn = inside.at(-1);
+    const after = lastIn ? words.find((w) => w.start > lastIn.start + 0.01 && !inside.includes(w)) : null;
+    const wall = after ? after.start - 0.03 : Infinity;
+    if (tail + 0.12 > r.end) r.end = r3(Math.max(r.end > wall ? wall : r.end, Math.min(tail + 0.12, r.end + 0.4, wall, nextStart > r.start ? Math.max(r.end, nextStart - 0.02) : Infinity)));
+  }
   // Widened takes must never overlap (that plays a word twice): takes that run on in the footage merge into one,
   // and a take that starts inside the one before it starts where that one ends.
   for (let i = 1; i < ranges.length; i++) {
@@ -292,8 +590,28 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
       } else b.end = Math.min(b.end, a.start);
     }
   }
+  // The plan can reuse footage out of order (ad #2 kept "click below…" inside the body and again as the ending): the
+  // later take keeps it, and the earlier one stops before it.
+  for (let j = 1; j < ranges.length; j++) {
+    for (let i = 0; i < j - 1; i++) {
+      const a = ranges[i];
+      const b = ranges[j];
+      if (b.start < a.end - 0.05 && b.end > a.start + 0.05) {
+        if (b.start > a.start + 0.3) a.end = r3(b.start - 0.02);
+        else if (b.end < a.end - 0.3) a.start = r3(b.end + 0.02);
+      }
+    }
+  }
+  for (let i = ranges.length - 1; i >= 0; i--) if (ranges[i].end - ranges[i].start < 0.2) ranges.splice(i, 1);
   // Only the words inside the kept takes matter from here; outside ones would sit between a restart and its repeat.
   words = dropRestarts(words.filter((w) => ranges.some((r) => w.end > r.start + 0.02 && w.start < r.end - 0.02)));
+  // Retakes the plan kept twice (the same line said again, e.g. two "click below" CTAs): only the last one plays.
+  const retakes = retakeSpans(ranges, words);
+  if (retakes.length) {
+    const drop = new Set(retakes.flatMap((x) => x.words));
+    words = words.filter((w) => !drop.has(w));
+    options = { ...options, exclude: [...(options.exclude || []), ...retakes.map((x) => ({ start: x.start, end: x.end, silent: true }))] };
+  }
   // Slips the listen-back found in the finished ad: exactly those words (matched by text, nearest to where they were
   // heard) come out, and with them their sound. Timings there are approximate, so nothing else is touched.
   const key = (w) => String(w.text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -311,6 +629,11 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   // Dead air goes, whatever the transcript says: each range keeps only where the voice is actually going (gaps
   // under a quarter second bridged), like a hand jump-cut. Then the usual filler and pause tightening.
   const tight = tightenClip(words, speechOnly(ranges, words, levels, (options.exclude || []).filter((e) => e.silent)), { filler: true, pauseMax: 0.3, pauseKeep: 0.1, minPiece: 0.9, absorbMax: 0.2 });
+  dropSlivers(tight.parts, words);
+  dropLeadIsland(tight.parts, words);
+  endOnCta(tight.parts, words, levels, planWords);
+  endOnVoice(tight.parts, levels);
+  clearDroppedWords(tight.parts, timedWords, words);
   let clock = 0;
   const parts = tight.parts.map((p) => {
     const part = { start: p.start, end: p.end, t: r3(clock), dur: r3(p.end - p.start) };
@@ -338,6 +661,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     zoom: false,
     autoFrame: true,
     musicBed: options.music === true && plan.music !== false ? "auto" : "none",
+    musicLevel: AD_MUSIC_LEVEL,
     grade: grade === "none" ? "none" : "clean",
     lut: options.lut || "none",
     ...(options.accent ? { accentColor: options.accent } : {}),
@@ -350,14 +674,14 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const graphics = [];
   const planned = (plan.graphics || [])
     // The planner returns logo moments ({ logos[], strike }); anything else (older plans) needs its words.
-    .map((g) => (g.kind === "number" ? { ...g, look: "stat", position: "center" } : g.kind === "checklist" ? { ...g, look: "list", position: "bottom" } : g.kind === "cta" ? { ...g, look: "cta", position: "bottom", text: g.text || "Book a call" } : g.kind === "proof" ? proofGraphic(g, options.testimonials) : g.kind === "check" ? { ...g, look: "check", position: "center" } : g.kind === "template" && TEMPLATES[g.template] ? { ...g, look: g.template, position: TEMPLATES[g.template].position } : g.kind === "slide" && (options.slides || []).some((x) => x.id === g.slide) ? { ...g, look: "slide", position: "top", text: g.text || " " } : g))
+    .map((g) => (g.kind === "number" ? { ...g, look: "stat", position: "center" } : g.kind === "checklist" ? { ...g, look: "list", position: "bottom" } : g.kind === "cta" ? { ...g, look: "cta", position: "bottom", text: g.text || options.ctaText || "Start free trial" } : g.kind === "proof" ? proofGraphic(g, options.testimonials) : g.kind === "check" ? { ...g, look: "check", position: "center" } : g.kind === "template" && TEMPLATES[g.template] ? { ...g, look: g.template, position: TEMPLATES[g.template].position } : g.kind === "slide" && (options.slides || []).some((x) => x.id === g.slide) ? { ...g, look: "slide", position: "top", text: g.text || " " } : g))
     .map((g) => (g.kind === "logos" && Array.isArray(g.logos) ? { ...g, look: "logo", logos: g.logos.filter((id) => (options.logos || []).some((l) => l.id === id)).slice(0, 3) } : g))
-    .filter((g) => LOOKS[g.look] && (g.look === "logo" ? g.logos?.length : g.look === "list" ? (g.items || []).filter(Boolean).length >= 2 : String(g.text || "").trim()))
+    .filter((g) => LOOKS[g.look] && (g.look === "logo" ? g.logos?.length : g.look === "list" ? (g.items || []).filter(Boolean).length >= 2 : TEMPLATES[g.look] ? String(g.text || "").trim() || (g.items || []).some((x) => String(x || "").trim()) : String(g.text || "").trim()))
     .map((g) => ({ g, t0: Math.max(0, wordAt(g.at) - 0.1), t1: Math.min(D, wordEnd(Math.max(g.at, g.until)) + 0.35) }))
     .sort((a, b) => a.t0 - b.t0);
   for (const [i, { g, t0, t1: end }] of planned.entries()) {
     const next = planned[i + 1];
-    let t1 = Math.max(end, t0 + (g.look === "list" ? 1.2 + (g.items?.length || 1) * 0.7 : g.look === "cta" ? 2.6 : g.look === "proof" || g.look === "slide" ? 3.2 : 1.8));
+    let t1 = Math.max(end, t0 + (g.look === "list" ? 1.2 + (g.items?.length || 1) * 0.7 : g.look === "cta" ? 2.6 : g.look === "proof" || g.look === "slide" ? 3.2 : TEMPLATES[g.look]?.minLen || 1.8));
     t1 = Math.min(t1, t0 + (g.look === "cta" ? 9 : 7), D, next ? next.t0 - 0.12 : D);
     const prev = graphics.at(-1);
     if (prev && t0 < prev.start + prev.duration) {
@@ -383,9 +707,11 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
       // The hero logo carries its name underneath (the brand as uploaded), unless the plan wrote one.
       ...(g.look === "logo" && !g.strike && !String(g.text || "").trim() ? { text: ((options.logos || []).find((l) => l.id === g.logos[0])?.name || "").toUpperCase() } : {}),
       sub: String(g.sub || "").trim().slice(0, 120),
-      highlight: String(g.highlight || "").trim().slice(0, 60),
-      items: (g.items || []).map((x) => String(x).trim().slice(0, 60)).filter(Boolean).slice(0, 5),
+      highlight: String(g.highlight || "").trim().slice(0, 140),
+      items: (g.items || []).map((x) => String(x).trim().slice(0, 140)).filter(Boolean).slice(0, 8),
       icon: g.icon || "",
+      // Kit templates can cut away to a full-screen scene (the dark or accent ground) while the voice carries on.
+      ...(TEMPLATES[look]?.scene && (g.fullscreen || TEMPLATES[look].scene === "always") ? { fullscreen: true, tone: ["accent", "paper"].includes(g.tone) ? g.tone : "dark", ...(TRANSITIONS.includes(g.transition) ? { transition: g.transition } : {}) } : {}),
       position: g.look === "logo" ? "top" : g.position,
     });
   }
@@ -426,6 +752,8 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   }
   graphics.sort((a, b) => a.start - b.start);
   graphics.forEach((g, i) => (g.id = `g${i + 1}`));
+  // Scenes the plan didn't give a transition rotate through them, so two cutaways never come in the same way.
+  graphics.filter((g) => g.fullscreen).forEach((g, i) => (g.transition ||= ["slide", "wipe", "fade", "circle"][i % 4]));
   const busy = (t0, t1) => graphics.some((g) => t0 < g.start + g.duration && t1 > g.start);
 
   // Intentional camera moves (punch in / slow push / pull out), never under a graphic: ads/graphics.js frames them.
@@ -456,6 +784,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const t0 = r3(Math.max(0, wordAt(v.at) - 0.03));
     const t1 = r3(Math.min(D - 0.3, wordEnd(Math.max(v.at, v.until ?? v.at)) + 0.05, t0 + 2.5));
     const ctaAt = graphics.find((g) => g.look === "cta" || TEMPLATES[g.look]?.job === "cta")?.start ?? D;
+    if (BANNED_VOICEFX.has(v.effect)) continue;
     if (t0 < 2 || t1 - t0 < 0.4 || t1 > ctaAt || voicefx.length >= 2 || (v.effect === "underwater" && voicefx.some((x) => x.effect === "underwater"))) continue;
     voicefx.push({ id: `x${voicefx.length + 1}`, type: "voicefx", start: t0, duration: r3(t1 - t0), effect: v.effect });
     if (v.effect === "underwater" && !clash(t0, t1)) camera.push({ id: `k${camera.length + 1}`, type: "camera", start: t0, duration: r3(t1 - t0), move: "punch" });
@@ -482,7 +811,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const swap = PALETTES[options.palette] || {};
   const addSfx = (name, t, volume, extra = {}) => {
     if (name in swap) name = swap[name];
-    if (!name || !SFX[name] || options.sfx === false || avoid.has(name)) return;
+    if (!name || !SFX[name] || options.sfx === false || avoid.has(name) || BANNED_SFX.has(name)) return;
     volume *= level;
     // Quiet: only the sounds that carry a moment (hits on logos/X, pops, clicks, cha-ching), no build-ups.
     if (level < 1 && ["riser", "whoosh-cinematic", "whoosh", "glitch-1", "glitch-2"].includes(name)) return;
@@ -494,13 +823,15 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const start = r3(Math.max(0, t));
     if (start >= D || sounds.some((s) => s.sfx === name && Math.abs(s.start - start) < 0.15)) return;
     const len = Math.max(0.2, Math.min(extra.duration, 3.5, D - start));
-    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: r3(volume * (options.sfxLevel ?? 1)), ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
+    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: r3(Math.min(volume * AD_SFX_GAIN * (options.sfxLevel ?? 1), sfxCap(name, options.sfxLoudness?.(name)))), ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
   };
   for (const g of graphics) {
-    for (const [name, off, vol] of GRAPHIC_SFX[g.look] || TEMPLATES[g.look]?.sfx || []) addSfx(name, off < 0 ? g.start + g.duration + off : g.start + off, vol);
+    for (const [name, off, vol] of GRAPHIC_SFX[g.look] || templateSfx(TEMPLATES[g.look], g)) addSfx(name, off < 0 ? g.start + g.duration + off : g.start + off, vol);
+    // A full-screen scene's transition gets its own sound, as in the Remotion cuts.
+    if (g.fullscreen) addSfx({ slide: "atlas-whoosh", wipe: "atlas-whoosh", circle: "atlas-impact", glitch: "atlas-click" }[g.transition] || "atlas-whoosh", Math.max(0, g.start - 0.1), g.transition === "circle" ? 0.6 : 0.4);
     if (g.look === "list") {
-      // A pop as each item's bubble lands (timings shared with the animation in ads/graphics.js).
-      for (const at of listTimes(g.duration, Math.min(4, g.items.length))) addSfx("pop", g.start + at, 0.45);
+      // A soft tick as each item's check draws (timings shared with the animation in ads/graphics.js).
+      for (const at of listTimes(g.duration, Math.min(4, g.items.length))) addSfx("tick", g.start + at + 0.1, 0.4);
     }
     if (g.look === "stat" && parseStat(g.text)) {
       // A counter ticking while the number counts up, then the cha-ching as it lands.

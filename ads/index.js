@@ -27,11 +27,12 @@ import { projectWords } from "../editor/document.js";
 import { ensureMattes } from "../editor/director/matte.js";
 import { TEMPLATES } from "./templates/index.js";
 import { DATA_DIR as EDITOR_DIR } from "../editor/media.js";
+import { sourceLevels } from "./levels.js";
 import { AD_CLIP, HISTORY_DIR, PALETTES, buildAdDocument, captionClips, readAdDocument, writeAdDocument } from "./build.js";
 import { GRADES, LOOKS, SFX } from "./graphics.js";
 import { LOGOS_DIR, sfxFile } from "./layers.js";
-import { DATA_DIR, findAd, load, newId, persist, update } from "./store.js";
-import { hasClaudeKey, planAd } from "./plan.js";
+import { DATA_DIR, findAd, load, newId, persist, readSettings, update, writeSettings } from "./store.js";
+import { DIRECTIONS, OFFERS, hasClaudeKey, offerCtaStyles, offerOf, planAd } from "./plan.js";
 import { VOICE_FX_DIR, ensureVoiceFx } from "./voicefx.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,36 @@ async function measureSfx() {
     const sec = Number.parseFloat(out);
     if (Number.isFinite(sec)) sfxLengths.set(name, sec);
   }
+  await measureSfxLoudness();
+}
+
+/** Each effect's loudest 400 ms (LUFS), for the loudness guard in build.js. Cached in data/ads/sfx-loudness.json. */
+const sfxLoud = new Map();
+const LOUD_FILE = path.join(DATA_DIR, "sfx-loudness.json");
+async function measureSfxLoudness() {
+  const saved = await fs.readFile(LOUD_FILE, "utf8").then(JSON.parse, () => ({}));
+  let changed = false;
+  for (const name of Object.keys(SFX)) {
+    const file = sfxFile(name);
+    if (!existsSync(file)) continue;
+    const size = (await fs.stat(file)).size;
+    if (saved[name]?.size !== size) {
+      let max = -Infinity;
+      // Padded with silence so sounds shorter than the 400 ms window still get a reading.
+      await run(FFMPEG, ["-hide_banner", "-nostats", "-v", "verbose", "-i", file, "-af", "apad=pad_dur=0.5,ebur128=framelog=verbose", "-f", "null", "-"], {
+        onLine: (l) => {
+          const m = l.match(/M:\s*(-?[\d.]+)/);
+          if (m) max = Math.max(max, Number(m[1]));
+        },
+      }).catch(() => {});
+      if (Number.isFinite(max)) {
+        saved[name] = { size, lufs: max };
+        changed = true;
+      }
+    }
+    if (saved[name]) sfxLoud.set(name, saved[name].lufs);
+  }
+  if (changed) await fs.writeFile(LOUD_FILE, JSON.stringify(saved, null, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +104,22 @@ async function waitForProject(ad, signal) {
 }
 
 const LESSONS_FILE = path.join(DATA_DIR, "lessons.json");
+/** A creative direction for an ad: any but the recent ones', chosen from the ad id so it's stable. */
+function pickDirection(id, recent) {
+  const all = Object.keys(DIRECTIONS);
+  const choices = all.filter((d) => !recent.includes(d));
+  const list = choices.length ? choices : all;
+  return list[Math.abs([...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)) % list.length];
+}
+
+/** A CTA design for an ad (plan.js CTA_STYLES): any but the last two ads', chosen from the ad id so it's stable. */
+function pickCtaStyle(id, recent, offer) {
+  const all = offerCtaStyles(offer);
+  const choices = all.filter((d) => !recent.includes(d));
+  const list = choices.length ? choices : all;
+  return list[Math.abs([...id].reduce((h, ch) => (h * 37 + ch.charCodeAt(0)) | 0, 11)) % list.length];
+}
+
 /** The creator's corrections, newest last (data/ads/lessons.json). plan.js reads the recent ones into every edit. */
 export async function readLessons() {
   return fs.readFile(LESSONS_FILE, "utf8").then((t) => JSON.parse(t).lessons || [], () => []);
@@ -185,12 +232,13 @@ Sounds:
 ${list("sfx", (c) => `- ${t(c.start)} ${c.sfx}`)}`;
 }
 
-/** The working copy with the LUT baked in, for previews (cached per LUT). */
+/** The working copy with the LUT baked in, for previews (cached per LUT, and per version of its .cube file). */
 async function gradedPreview(project, ad, lutId, luts, signal) {
   const lut = luts.find((l) => l.id === lutId);
   if (!lut) return null;
   const dir = path.join(DATA_DIR, "previews");
-  const file = `${ad.id}-${lutId}.mp4`;
+  const version = Math.round((await fs.stat(lut.file)).mtimeMs).toString(36);
+  const file = `${ad.id}-${lutId}-${version}.mp4`;
   const out = path.join(dir, file);
   if (existsSync(out)) return { file, lut: lutId };
   await update(ad, { message: "Applying your color grade to the preview…" });
@@ -294,11 +342,34 @@ export async function realignTakes(project, ranges, words, signal, levels = null
       let endAt = -1;
       for (let j = fresh.length - 1; j >= tailFrom; j--) if ([1, 2].some((n) => j - n + 1 >= 0 && like(joined(fresh, j - n + 1, n), lastKey))) { endAt = j; break; }
       if (endAt >= 0) fresh = fresh.slice(0, endAt + 1);
-      else fresh = fresh.filter((w) => (w.start + w.end) / 2 < r.end);
+      else {
+        fresh = fresh.filter((w) => (w.start + w.end) / 2 < r.end);
+        // The transcriber dropped the take's last words ("…free trial and | learn more."): they come back from the
+        // long transcript, after the last word both heard, each right after the one before.
+        const plan = words.slice(r.fromIdx, r.toIdx + 1);
+        const tail = fresh.slice(-3).map(key);
+        let at = -1;
+        for (let j = plan.length - 1; j >= Math.max(0, plan.length - 8) && at < 0; j--) if (tail.some((k) => like(key(plan[j]), k))) at = j;
+        const lastFresh = fresh.at(-1);
+        if (at >= 0 && at < plan.length - 1 && lastFresh && like(key(plan[at]), key(lastFresh))) {
+          const round = (n) => Math.round(n * 1000) / 1000;
+          let prev = lastFresh.end;
+          for (const w of plan.slice(at + 1)) {
+            const start = Math.max(prev, w.start);
+            fresh.push({ text: w.text, start: round(start), end: round(start + Math.max(0.1, w.end - w.start)) });
+            prev = start + Math.max(0.1, w.end - w.start);
+          }
+        }
+      }
       if (!fresh.length) continue;
+      // The long transcript's words for this take are replaced whole, even where the take narrows to its fresh words
+      // (they'd otherwise sit next to their fresh copies: "trial or… trial or").
+      const was = { start: r.start, end: r.end };
       if (startAt >= 0) r.start = Math.round(Math.max(0, fresh[0].start - 0.06) * 1000) / 1000;
       if (endAt >= 0) r.end = Math.round((fresh.at(-1).end + 0.1) * 1000) / 1000;
-      out = [...out.filter((w) => w.end <= r.start + 0.05 || w.start >= r.end - 0.05), ...fresh].sort((a, b) => a.start - b.start);
+      const from = Math.min(r.start, was.start);
+      const to = Math.max(r.end, was.end);
+      out = [...out.filter((w) => w.end <= from + 0.05 || w.start >= to - 0.05), ...fresh].sort((a, b) => a.start - b.start);
     } catch (err) {
       if (signal.aborted) throw err;
       console.error(`Ads: realign take ${i}`, err.message);
@@ -504,7 +575,15 @@ async function runEdit(ad) {
     const others = (await load()).ads.filter((a) => a.id !== ad.id && (a.style || a.plan)).sort((a, b) => String(b.editedAt || "").localeCompare(String(a.editedAt || "")));
     const recentTemplates = [...new Set(others.slice(0, 4).flatMap((a) => [...(a.plan?.graphics || []).filter((g) => g.kind === "template").map((g) => g.template), ...(a.plan?.camera || []).filter((m) => !["punch", "push", "pull"].includes(m.move)).map((m) => `cut hit ${m.move}`), ...(a.plan?.voice_fx || []).map((v) => `voice ${v.effect}`)]))];
     const slides = await readSlides();
+    // Creative direction: a different motion-graphics family from the last two ads (plan.js DIRECTIONS). A re-edit
+    // without one (ads made before directions existed) gets a fresh one too.
+    const recentDirections = others.slice(0, 2).map((a) => a.style?.direction).filter(Boolean);
+    const direction = ad.style?.direction && ad.redo && !/switch|style|creative|different/i.test(ad.prompt || "") ? ad.style.direction : pickDirection(ad.id, recentDirections);
+    const recentCtas = others.slice(0, 2).map((a) => a.style?.ctaStyle).filter(Boolean);
+    const ctaStyle = ad.style?.ctaStyle && ad.redo && !/cta|switch|style|creative|different/i.test(ad.prompt || "") ? ad.style.ctaStyle : pickCtaStyle(ad.id, recentCtas, offerOf(ad.options));
     const plan = await planAd({
+      ctaStyle,
+      direction,
       slides: slides.map((x) => ({ ...x, path: path.join(SLIDES_DIR, x.file) })),
       recentTemplates,
       previous,
@@ -524,22 +603,24 @@ async function runEdit(ad) {
     signal.throwIfAborted();
     await update(ad, { message: "Building the timeline: cuts, captions, graphics and sound effects…" });
     await measureSfx();
-    // Grade: a LUT the creator picked, else their own LUT when "Auto" (it's made for their camera), else Claude's pick.
-    const picked = luts.some((l) => l.id === ad.options?.lut) ? ad.options.lut : null;
-    // "Ads Boost" is their LUT with extra contrast, brightness and saturation (the creator's call for ads).
-    const auto = (!ad.options?.grade || ad.options.grade === "auto") && luts.length ? (luts.find((l) => /ads boost/i.test(l.title)) || luts[0]).id : null;
+    // Grade: a LUT the creator picked, else their grade template (Template 1 unless they changed it), else Claude's pick.
+    const lutId = resolveLut(ad.options, luts, await readSettings());
     // Rotation: a different sound palette and different number-card / CTA styles from the most recent ads.
     const lastStyle = others.find((a) => a.style)?.style || {};
     const pick = (list, last) => {
       const choices = list.filter((x) => x !== last);
       return choices[Math.abs([...ad.id].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7)) % choices.length];
     };
-    const style = ad.style && !ad.redo ? ad.style : { palette: pick(Object.keys(PALETTES), lastStyle.palette), stat: pick(["glow", "pill"], lastStyle.stat), cta: pick(["button", "sonar"], lastStyle.cta) };
+    const style = ad.style && !ad.redo ? { ...ad.style } : { palette: pick(Object.keys(PALETTES), lastStyle.palette), stat: pick(["glow", "pill"], lastStyle.stat), cta: pick(["button", "sonar"], lastStyle.cta) };
     if (ad.redo && ad.style) Object.assign(style, ad.style);
-    const options = { ...ad.options, slides: await readSlides(), logos, testimonials, lut: picked || auto || "none", ctaText: "Try it free", palette: style.palette, variants: { stat: style.stat, cta: style.cta } };
+    style.direction = direction;
+    style.ctaStyle = ctaStyle;
+    const options = { ...ad.options, sfxLoudness: (n) => sfxLoud.get(n), slides: await readSlides(), logos, testimonials, lut: lutId || "none", ctaText: OFFERS[offerOf(ad.options)].cta, palette: style.palette, variants: { stat: style.stat, cta: style.cta } };
     const levels = await measureLevels(project, { signal }).catch(() => null);
+    // Where the voice really is comes from the original recording: the cleaned copy lifts silence to speech level.
+    const voice = (await sourceLevels(project, { signal }).catch(() => null)) || levels;
     await update(ad, { message: "Checking every cut against a fresh transcript…" });
-    const built = await buildAdDocument({ project, plan, words, aspect: ad.aspect, options, levels, sfxDuration: (n) => sfxLengths.get(n), realign: (ranges, all) => realignTakes(project, ranges, all, signal, levels) });
+    const built = await buildAdDocument({ project, plan, words, aspect: ad.aspect, options, levels: voice, sfxDuration: (n) => sfxLengths.get(n), realign: (ranges, all) => realignTakes(project, ranges, all, signal, levels) });
     // Captions from the finished ad itself: its voice, cut together, transcribed start to finish. They can't
     // disagree with what plays, and it's how leftover repeats get caught.
     await update(ad, { message: "Listening to the finished cut for the captions…" });
@@ -555,7 +636,7 @@ async function runEdit(ad) {
       if (!slips.length && !silences.length) break;
       await update(ad, { message: `Cutting ${slips.length + silences.length} leftover pause${slips.length + silences.length === 1 ? "" : "s"} and repeats…` });
       exclude.push(...slips, ...silences);
-      const again = await buildAdDocument({ project, plan, words, aspect: ad.aspect, options: { ...options, exclude }, levels, sfxDuration: (n) => sfxLengths.get(n), realign: (ranges, all) => realignTakes(project, ranges, all, signal, levels) });
+      const again = await buildAdDocument({ project, plan, words, aspect: ad.aspect, options: { ...options, exclude }, levels: voice, sfxDuration: (n) => sfxLengths.get(n), realign: (ranges, all) => realignTakes(project, ranges, all, signal, levels) });
       Object.assign(built, again);
       heard = await finalCaptions(project, built.doc, signal).catch(() => null);
     }
@@ -633,6 +714,8 @@ async function view(ad) {
       : null,
     busy: jobs.has(ad.id),
     handEdited,
+    // The LUT the edited ad is graded with ("none" for a built-in grade), so the grade menu shows what's really on it.
+    lutInUse: doc ? doc.design?.lut || "none" : null,
     sizeBytes: await adSize(ad),
     previewUrl: ad.status === "ready" ? `/api/editor/projects/${ad.projectId}/clips/${ad.clipId}/preview` : null,
     editorUrl: ad.status === "ready" ? `#/edit/${ad.projectId}/${ad.clipId}` : null,
@@ -643,11 +726,58 @@ async function view(ad) {
   };
 }
 
-const OPTION_KEYS = { music: "bool", sfx: "bool", captions: "bool", grade: "grade", lut: "id", accent: "hex" };
+/**
+ * The Assets LUT an ad is graded with, or null for a built-in grade: a LUT picked by name, else the grade template
+ * it's on (1 or 2), else — on "auto" — the default template. Old ads with no templates saved fall back to Ads Boost.
+ */
+function resolveLut(options = {}, luts, settings) {
+  const has = (id) => luts.some((l) => l.id === id);
+  if (has(options.lut)) return options.lut;
+  const template = options.template === 1 || options.template === 2 ? options.template : !options.grade || options.grade === "auto" ? settings.defaultTemplate : null;
+  if (!template) return null;
+  const id = settings.gradeTemplates[template - 1];
+  if (has(id)) return id;
+  return luts.length ? (luts.find((l) => /ads boost/i.test(l.title)) || luts[0]).id : null;
+}
+
+/** The grade templates with their LUT names, for the Ads page. */
+async function gradeTemplates(luts) {
+  const settings = await readSettings();
+  return {
+    templates: settings.gradeTemplates.map((id, i) => ({ n: i + 1, lut: id, title: luts.find((l) => l.id === id)?.title || null })),
+    defaultTemplate: settings.defaultTemplate,
+  };
+}
+
+/**
+ * Switch a finished ad's colour grade without re-editing it: the timeline keeps every cut and graphic, only the
+ * grade changes (the replaced timeline is kept in history). A LUT also gets its graded preview copy.
+ */
+async function applyGrade(ad, options, signal) {
+  const project = await loadProject(ad.projectId);
+  const doc = await readAdDocument(ad.projectId, ad.clipId);
+  if (!project || !doc) throw new Error("Edit the ad first.");
+  const luts = await listLuts();
+  const lut = resolveLut(options, luts, await readSettings());
+  const grade = lut ? "none" : GRADES[options.grade] ? options.grade : ad.grade && ad.grade !== "none" ? ad.grade : "clean";
+  if (doc.design.lut !== (lut || "none") || doc.design.grade !== (grade === "none" ? "none" : "clean")) {
+    doc.design.lut = lut || "none";
+    doc.design.grade = grade === "none" ? "none" : "clean";
+    const saved = await writeAdDocument(doc);
+    // The switch isn't a hand edit in the timeline, so it mustn't trigger the "you've edited this" warning.
+    if (ad.rev && ad.rev === saved.rev - 1) await update(ad, { rev: saved.rev });
+  }
+  const preview = lut ? await gradedPreview(project, ad, lut, luts, signal) : null;
+  await update(ad, { options, grade, preview, message: "" });
+  return ad;
+}
+
+const OPTION_KEYS = { music: "bool", sfx: "bool", captions: "bool", grade: "grade", lut: "id", template: "template", accent: "hex", offer: "offer" };
 function optionsFrom(input = {}, prev = {}) {
   // Defaults: no captions, a music bed for anticipation, sound effects on (the creator's calls, ads/STYLE.md).
   // Defaults are the creator's standing choices: sound effects, music bed and captions all on.
-  const out = { music: true, sfx: true, captions: true, grade: "auto", lut: "none", accent: null, ...prev };
+  // The offer an ad ends on defaults to the ATLAS 7-day free trial (the creator's current ads).
+  const out = { music: true, sfx: true, captions: true, grade: "auto", lut: "none", template: null, accent: null, offer: "trial", ...prev };
   for (const [key, type] of Object.entries(OPTION_KEYS)) {
     const v = input[key];
     if (v === undefined) continue;
@@ -655,6 +785,8 @@ function optionsFrom(input = {}, prev = {}) {
     if (type === "grade") out[key] = GRADES[v] ? v : "auto";
     if (type === "id") out[key] = /^[\w-]{1,40}$/.test(String(v)) ? String(v) : "none";
     if (type === "hex") out[key] = /^#[0-9a-f]{6}$/i.test(String(v)) ? String(v) : null;
+    if (type === "offer") out[key] = OFFERS[v] ? v : "trial";
+    if (type === "template") out[key] = Number(v) === 1 || Number(v) === 2 ? Number(v) : null;
   }
   return out;
 }
@@ -685,14 +817,17 @@ export function createAds() {
   router.get("/", handle(async () => {
     const { ads } = await load();
     const list = await Promise.all([...ads].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(view));
+    const luts = await listLuts();
     return {
       ads: list,
       claude: hasClaudeKey(),
       aspects: Object.fromEntries(Object.entries(ASPECTS).map(([k, a]) => [k, a.hint])),
       grades: Object.fromEntries(Object.entries(GRADES).map(([k, g]) => [k, g.label])),
-      luts: (await listLuts()).map((l) => ({ id: l.id, title: l.title })),
+      luts: luts.map((l) => ({ id: l.id, title: l.title })),
+      ...(await gradeTemplates(luts)),
       looks: LOOKS,
       sfx: SFX,
+      offers: Object.fromEntries(Object.entries(OFFERS).map(([k, o]) => [k, { label: o.label, cta: o.cta, brief: o.brief }])),
     };
   }));
 
@@ -720,7 +855,7 @@ export function createAds() {
       createdAt: now,
       updatedAt: now,
     };
-    db.ads.push(ad);
+    (await load()).ads.push(ad); // re-read: another process may have written the list since
     await persist();
     await ensureLogos(ad);
     res.status(201);
@@ -730,6 +865,18 @@ export function createAds() {
   // Slides & images library (shared by every ad): the creator's decks and brand images, which the planner can
   // bring into an ad as a slide moment (look "slide").
   const slideUpload = multer({ dest: path.join(os.tmpdir(), "ads-slides"), limits: { fileSize: 40 * 1024 * 1024, files: 60 } });
+  // Grade templates: which Assets LUT is Template 1 and 2, and which one new ads start on.
+  router.put("/settings", handle(async (req) => {
+    const luts = await listLuts();
+    const current = await readSettings();
+    const body = req.body || {};
+    const pick = (v, prev) => (v === "none" || luts.some((l) => l.id === v) ? v : prev);
+    const slots = Array.isArray(body.gradeTemplates) ? [pick(body.gradeTemplates[0], current.gradeTemplates[0]), pick(body.gradeTemplates[1], current.gradeTemplates[1])] : current.gradeTemplates;
+    const defaultTemplate = body.defaultTemplate === 1 || body.defaultTemplate === 2 ? body.defaultTemplate : current.defaultTemplate;
+    await writeSettings({ gradeTemplates: slots, defaultTemplate });
+    return gradeTemplates(luts);
+  }));
+
   router.get("/slides", handle(async () => ({ slides: (await readSlides()).map((x) => ({ ...x, url: `${"/api/ads"}/slides/${encodeURIComponent(x.file)}` })) })));
   router.post("/slides", slideUpload.array("slides", 60), handle(async (req) => {
     const slides = await readSlides();
@@ -886,6 +1033,15 @@ export function createAds() {
     return view(ad);
   }));
 
+  // Change a finished ad's colour grade on the spot (no re-edit). Saving the video afterwards bakes it in.
+  router.post("/:id/grade", handle(async (req) => {
+    const ad = await need(req.params.id);
+    if (ad.status !== "ready" || jobs.has(ad.id)) throw new Error("Wait for the edit to finish first.");
+    const controller = new AbortController();
+    await applyGrade(ad, optionsFrom(req.body?.options, ad.options), controller.signal);
+    return view(ad);
+  }));
+
   // Save: render the ad (as it stands in the timeline) to an MP4.
   router.post("/:id/save", handle(async (req) => {
     const ad = await need(req.params.id);
@@ -956,7 +1112,6 @@ export function createAds() {
   // Delete an ad and everything it takes up: its video (the project, with renders and working copies), the
   // timeline, previews, backups and logos. ?keepVideo=1 forgets only the ad.
   router.delete("/:id", handle(async (req) => {
-    const db = await load();
     const ad = await need(req.params.id);
     if (jobs.has(ad.id) || editQueue.includes(ad.id)) {
       jobs.get(ad.id)?.abort();
@@ -978,7 +1133,8 @@ export function createAds() {
     await fs.rm(path.join(LOGOS_DIR, ad.id), { recursive: true, force: true });
     for (const f of await fs.readdir(path.join(DATA_DIR, "previews")).catch(() => [])) if (f.startsWith(`${ad.id}-`)) await fs.rm(path.join(DATA_DIR, "previews", f), { force: true });
     for (const f of await fs.readdir(VOICE_FX_DIR).catch(() => [])) if (f.startsWith(`${ad.projectId}-`)) await fs.rm(path.join(VOICE_FX_DIR, f), { force: true });
-    db.ads = db.ads.filter((a) => a.id !== ad.id);
+    const fresh = await load(); // re-read: the steps above take a while, and another process may have written the list
+    fresh.ads = fresh.ads.filter((a) => a.id !== ad.id);
     await persist();
     sizeCache.delete(ad.id);
     return { ok: true, freed };

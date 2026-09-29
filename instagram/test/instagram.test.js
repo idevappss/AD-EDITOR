@@ -23,7 +23,7 @@ test("creates a resumable Reels container and uploads the file with rupload head
   const ig = createInstagramClient({ fetch });
 
   const container = await ig.createReelContainer(account, { caption: "Hi #fyp", shareToFeed: false, thumbOffsetMs: 1500.4 });
-  assert.deepEqual(container, { id: "cont1", uri: "https://rupload.facebook.com/ig-api-upload/v25.0/cont1" });
+  assert.deepEqual(container, { id: "cont1", hosted: false, uri: "https://rupload.facebook.com/ig-api-upload/v25.0/cont1" });
   assert.equal(requests[0].url.href, "https://graph.instagram.com/v25.0/17841400000/media");
   assert.equal(requests[0].method, "POST");
   assert.deepEqual(requests[0].body, { media_type: "REELS", upload_type: "resumable", caption: "Hi #fyp", share_to_feed: "false", thumb_offset: "1500", access_token: "TOKEN" });

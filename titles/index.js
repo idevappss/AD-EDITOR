@@ -14,6 +14,9 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(DIR, "..");
 const LIBRARY = path.join(DIR, "favorites.json");
 const STYLE = path.join(DIR, "STYLE.md");
+const PHRASES = path.join(DIR, "PHRASES.md");
+// Owned by other sessions: read only, and only the sections about how he speaks.
+const VOICE = path.join(ROOT, "shared", "ODELL_VOICE.md");
 
 /**
  * hook = on-screen clip headline, opener = line said or shown in the first two seconds,
@@ -102,13 +105,15 @@ export function recordEdit({ before, after, kind = "hook", source = "edit" }) {
 
 /** Teaches Claude the creator's taste. Empty string until there's something to teach. */
 export async function titleGuidance() {
-  const [rawStyle, lib] = await Promise.all([fs.readFile(STYLE, "utf8").catch(() => ""), loadLibrary()]);
-  const style = rawStyle.replace(/<!--[\s\S]*?-->/g, "").trim();
+  const read = (f) => fs.readFile(f, "utf8").then((t) => t.replace(/<!--[\s\S]*?-->/g, "").trim(), () => "");
+  const [style, phrases, voiceDoc, lib] = await Promise.all([read(STYLE), read(PHRASES), read(VOICE), loadLibrary()]);
+  // Sections 3 (Voice) and 4 (Hooks traceable to his real story) are the title-relevant ones.
+  const voice = (voiceDoc.match(/^## (?:3|4)\. [\s\S]*?(?=^## (?!3\.|4\.)|$)/gmu) || []).join("\n").trim();
   const liked = lib.liked.slice(-MAX_LIKED);
   const loved = liked.filter((x) => !x.editedFrom);
   const rewrites = liked.filter((x) => x.editedFrom);
   const rejected = lib.avoid.slice(-MAX_AVOID);
-  if (!style && !liked.length && !rejected.length) return "";
+  if (!style && !phrases && !voice && !liked.length && !rejected.length) return "";
 
   const line = (x) => `- ${x.title}${x.kind ? ` [${x.kind}]` : ""}${x.note ? ` — ${x.note}` : ""}`;
   const parts = [
@@ -116,6 +121,12 @@ export async function titleGuidance() {
 The creator has a specific taste in titles. Match it in everything you write: on-screen clip hooks, opening lines, post titles, YouTube titles and title ideas. Learn the patterns (voice, rhythm, word choice, structure, capitalization, punctuation, length) and write new ones in that voice about THIS video. Taste carries across formats, but each format keeps its own length and job. Never copy an example or borrow its specifics. Tags: [hook] on-screen clip headline, [opener] opening line, [post] post title, [youtube] YouTube title, [idea] title idea.`,
   ];
   if (style) parts.push(`<style_guide>\n${style}\n</style_guide>`);
+  if (phrases) parts.push(`<creator_language>\n${phrases}\n</creator_language>`);
+  if (voice) {
+    parts.push(
+      `<creator_voice source="shared/ODELL_VOICE.md">\nHow Dr. Odell speaks, and the hooks that come from his own life. These are HIS: if this video is someone else\u2019s footage, take the rhythm and structure only — never his story, his numbers or his lines.\n${voice}\n</creator_voice>`,
+    );
+  }
   if (loved.length) {
     // Grouped by format: taste carries across them, but length and job don't.
     const groups = [...KINDS, null]
