@@ -64,6 +64,22 @@
         "/Users/wfp/Documents/CLAUDE/HBA CLIPS/ads/dev.js"
       ],
       "port": 5198
+    },
+    {
+      "name": "clipping",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/clipping/dev.js"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "thumbnails",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/thumbnails/dev.js"
+      ],
+      "port": 5196
     }
   ]
 }

@@ -208,6 +208,14 @@ async function route() {
     window.scrollTo(0, 0);
     return;
   }
+  // Clipping: one video in, its winning moment out five ways for five pages (clipping/).
+  if (pathPart.startsWith("/clipping")) {
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "clipping"));
+    const { mountClipping } = await import("/api/clipping/ui/clipping.js");
+    await mountClipping(app);
+    window.scrollTo(0, 0);
+    return;
+  }
   // Thumbnails: the thumbnail made for every video (thumbnails/, owned by the Thumbnails session).
   if (pathPart.startsWith("/thumbnails")) {
     $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "thumbnails"));

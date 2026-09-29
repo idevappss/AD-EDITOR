@@ -101,6 +101,7 @@ import analytics from "./analytics/index.js";
 import { router as memoryRouter } from "./memory/index.js";
 import thumbnails from "./thumbnails/index.js";
 import ads from "./ads/index.js";
+import clipping from "./clipping/index.js";
 import {
   CAN_PUBLISH,
   PUBLISHERS,
@@ -166,6 +167,9 @@ thumbnails.start();
 // Ads Editor: raw ad footage → cut, graded, motion graphics + sound effects (ads/, Ads Editor session; ads/README.md).
 app.use("/api/ads", ads.router);
 ads.start();
+// Clipping: a video's winning moment cut five ways, one per page (clipping/index.js).
+app.use("/api/clipping", clipping.router);
+clipping.start();
 // Dope edits planner (edits/, DOPE CLIPS session; shared/EDIT_PLAN.md). It only plans here: lib/dope.js +
 // lib/editplan.js preview and render its plans with HyperFrames.
 const editsPlanner = createEditsIntegration({ sounds: { addTrack }, render: false });
