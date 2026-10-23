@@ -1,4 +1,4 @@
-# HBA Content Backend ↔ Instagram integration contract
+# Ads Editor ↔ Instagram integration contract
 
 | Area | Owner | Files |
 |---|---|---|
@@ -29,8 +29,8 @@ const result = await instagram.publish({ post, account, videoPath });
 
 | Param | Meaning |
 |---|---|
-| `post` | HBA Content Backend post. The publisher reads `id`, `caption`, and optionally `thumbOffsetMs` (cover frame). |
-| `account` | HBA Content Backend account with `platform: "instagram"`. It links to a connected Instagram login by `account.igUserId` if set, otherwise by `account.handle` matching the connected username (case-insensitive, leading `@` ignored). |
+| `post` | Ads Editor post. The publisher reads `id`, `caption`, and optionally `thumbOffsetMs` (cover frame). |
+| `account` | Ads Editor account with `platform: "instagram"`. It links to a connected Instagram login by `account.igUserId` if set, otherwise by `account.handle` matching the connected username (case-insensitive, leading `@` ignored). |
 | `videoPath` | Absolute path to the finished MP4. No public URL is needed: the publisher uploads the local file with Instagram's resumable upload. |
 
 - **On success** it resolves with the result above. Store `permalink` (and `mediaId`) on the target so the UI can link to the live Reel.

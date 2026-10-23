@@ -18,6 +18,26 @@ const ICON = {
   play: svg(`<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>`, 16),
   playBig: svg(`<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>`, 22),
   close: svg(`<path d="M6 6l12 12M18 6 6 18"/>`, 18),
+  chevron: svg(`<path d="m8 10 4 4 4-4"/>`, 16),
+  chevR: svg(`<path d="m10 7 5 5-5 5"/>`, 14),
+  plus: svg(`<path d="M12 5v14M5 12h14"/>`, 15),
+  pause: svg(`<path d="M8 5.5v13M16 5.5v13" stroke-width="3"/>`, 18),
+  playT: svg(`<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>`, 18),
+  vol: svg(`<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/>`, 20),
+  mute: svg(`<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="m16 10 4 4m0-4-4 4"/>`, 20),
+  eye: svg(`<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>`, 16),
+  arrow: svg(`<path d="M5 12h14m-5-5 5 5-5 5"/>`, 18),
+  info: svg(`<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>`, 15),
+  heart: svg(`<path d="M12 19.5s-7.5-4.4-7.5-10A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 7.5 2.5c0 5.6-7.5 10-7.5 10z"/>`, 19),
+  comment: svg(`<path d="M20 11.5a8 8 0 0 1-11.6 7.1L4 19.5l1-4A8 8 0 1 1 20 11.5z"/>`, 19),
+  send: svg(`<path d="M21 4 10.5 14.5M21 4l-6.5 16-4-5.5L4 11z"/>`, 19),
+  bookmark: svg(`<path d="M6.5 4h11v16l-5.5-4-5.5 4z"/>`, 19),
+  dots: svg(`<circle cx="5.5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18.5" cy="12" r="1.2" fill="currentColor"/>`, 19),
+  globe: svg(`<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.5 3.5 5.5 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.5-3.5-8.5s1-6 3.5-8.5z"/>`, 12),
+  like: svg(`<path d="M7.5 10.5v9h-3v-9zM7.5 10.5 11 3.5a2 2 0 0 1 2 2v4h5.2a2 2 0 0 1 2 2.3l-1.2 6a2 2 0 0 1-2 1.7H7.5"/>`, 17),
+  person: `<svg viewBox="0 0 120 120" width="120" height="120" fill="currentColor" aria-hidden="true"><circle cx="60" cy="44" r="20"/><path d="M22 112c3-24 18-38 38-38s35 14 38 38z"/></svg>`,
+  ig: `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><defs><linearGradient id="igg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#feda75"/><stop offset=".35" stop-color="#fa7e1e"/><stop offset=".6" stop-color="#d62976"/><stop offset="1" stop-color="#4f5bd5"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#igg)"/><rect x="6.5" y="6.5" width="11" height="11" rx="3.5" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="16.6" cy="7.4" r="1" fill="#fff"/></svg>`,
+  fb: `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#1877f2"/><path d="M13.3 20.5v-6.6h2.2l.4-2.6h-2.6V9.7c0-.8.3-1.3 1.4-1.3h1.3V6.1c-.3 0-1.1-.1-2-.1-2 0-3.3 1.2-3.3 3.4v1.9H8.5v2.6h2.2v6.6z" fill="#fff"/></svg>`,
 };
 const IDEAS = [
   "Cut every retake and flub, keep only the best takes",
@@ -28,14 +48,53 @@ const IDEAS = [
   "Open with the strongest hook",
 ];
 
-const state = { config: null, ads: [], slides: [], selected: new Set(), poll: null, uploading: null, batch: loadBatch() };
+// look: the grade just picked on an ad, shown as a still over the player until its graded preview video is ready.
+const state = { config: null, ads: [], slides: [], selected: new Set(), poll: null, uploading: null, batch: null, look: null, staged: [], brand: null, pickThenCreate: false, studio: { mode: "compare", step: "pick", volume: 0.8 } };
 
-/** The batch brief and switches, remembered in this browser (a convenience; nothing depends on it). */
+/** The editing styles on the Create page (their edit presets live server-side in ads/styles.js). */
+const STYLES = [
+  {
+    id: "talking-head",
+    name: "Basic",
+    line: "Clean cuts. White captions. A pop-in when it matters.",
+    offer: "call", // how the ad ends (plan.js OFFERS): Basic ads sell a booked call
+    ends: "Book your free call",
+    short: "Clean cuts & captions",
+    copy: "Your next chapter starts here.",
+    // A real ad made in this style (ads/examples/): the After in the studio. `before` (its raw footage) plays beside it
+    // once it's added; until then the Before card says it's coming.
+    example: { video: `${API}/examples/talking-head.mp4`, poster: `${API}/examples/talking-head.jpg`, before: null, title: "AD 31 · Three AI Employees Your Practice Needs" },
+  },
+  {
+    id: "premium",
+    name: "Premium",
+    line: "Cinematic color. Subtle motion. A polished finish.",
+    offer: "trial", // Premium ads end on the ATLAS 7-day free trial
+    ends: "ATLAS 7-day free trial",
+    short: "Cinematic color & motion",
+    copy: "Built for better.",
+    example: { video: `${API}/examples/premium.mp4`, poster: `${API}/examples/premium.jpg`, before: null, title: "Stop Paying Someone To Chase" },
+  },
+  // Custom: no preset; the edit follows the note. A placeholder card until its own layout is designed.
+  { id: "custom", name: "Custom", line: "Your idea, your way. The edit follows your note.", short: "Your creative direction", copy: "Made your way.", offer: "trial", ends: "ATLAS 7-day free trial" },
+];
+/** Where the ad runs decides its shape: Reels cut 9:16, the feed 4:5 (keys kept from the old platform switch). */
+const PLATFORMS = {
+  instagram: { name: "Reels", aspect: "9:16", hint: "Instagram & Facebook Reels" },
+  facebook: { name: "Feed", aspect: "4:5", hint: "Instagram & Facebook feed" },
+};
+state.batch = loadBatch();
+
+/** The batch brief, style and platform, remembered in this browser (a convenience; nothing depends on it). Every
+ *  upload is always edited and saved when done: those were switches once, so old saved values are overridden. */
 function loadBatch() {
   try {
-    return { prompt: "", auto: true, save: true, offer: "trial", ...JSON.parse(localStorage.getItem("ads.batch") || "{}") };
+    const saved = { prompt: "", editStyle: "talking-head", platform: "instagram", ...JSON.parse(localStorage.getItem("ads.batch") || "{}"), auto: true, save: true };
+    if (!STYLES.some((st) => st.id === saved.editStyle)) saved.editStyle = "talking-head";
+    if (!PLATFORMS[saved.platform]) saved.platform = "instagram";
+    return saved;
   } catch {
-    return { prompt: "", auto: true, save: true };
+    return { prompt: "", editStyle: "talking-head", platform: "instagram", auto: true, save: true };
   }
 }
 function saveBatch() {
@@ -116,6 +175,32 @@ function gradeOptionsFrom(value) {
   return { template: null, grade: id, lut: "none" };
 }
 
+/** The Assets LUT a dropdown value grades with, or null for a built-in grade. */
+function lutOf(value, cfg) {
+  const [kind, id] = value.split(/:(.*)/);
+  if (kind === "lut") return id;
+  if (kind === "template") return (cfg.templates || []).find((t) => t.n === Number(id))?.lut || null;
+  return null;
+}
+
+/** Where the preview is in the footage (source seconds), so the still shows the frame you're looking at. */
+function previewSourceTime() {
+  const player = $(".ad-stage hyperframes-player", root);
+  const frame = player?.shadowRoot?.querySelector("iframe") || player?.querySelector("iframe");
+  try {
+    return frame?.contentDocument?.querySelector("video")?.currentTime || 0;
+  } catch {
+    return 0; // the player's frame isn't readable: show the opening
+  }
+}
+
+/** The still of the picked grade over the player, while its preview video builds. */
+function lookOverlay(ad) {
+  const look = state.look?.id === ad.id ? state.look : null;
+  if (!look) return "";
+  return `<div class="ad-look"><img src="${esc(look.url)}" alt="" /><span class="ad-look-note"><i class="ad-spin"></i>${esc(look.name)}. The video updates in a moment.</span></div>`;
+}
+
 function gradeSelect(ad, cfg) {
   const slots = gradeSlots(cfg);
   const value = gradeValue(ad, cfg);
@@ -127,6 +212,17 @@ function gradeSelect(ad, cfg) {
     <optgroup label="Built-in grades">${slots.length ? "" : opt("grade:auto", "Auto (AI picks)")}${Object.entries(cfg.grades || {}).map(([k, label]) => opt(`grade:${k}`, label)).join("")}</optgroup>
     ${others.length ? `<optgroup label="Your other LUTs">${others.map((l) => opt(`lut:${l.id}`, l.title)).join("")}</optgroup>` : ""}
   </select>`;
+}
+
+/** The grade templates, folded away under "Ad settings" (open or closed is remembered in this browser). */
+function adSettings(cfg) {
+  const inner = gradeSettings(cfg);
+  if (!inner) return "";
+  let open = false;
+  try {
+    open = localStorage.getItem("ads-settings-open") === "1";
+  } catch {}
+  return `<details class="ad-settings" id="ad-settings" ${open ? "open" : ""}><summary><span>Ad settings</span><small>Color grade templates</small>${ICON.chevron}</summary>${inner}</details>`;
 }
 
 /** Template 1 / Template 2 and which one new ads start on, on the Ads page. Saved for everyone (data/ads/settings.json). */
@@ -146,35 +242,17 @@ function gradeSettings(cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// List view: the upload box and every ad so far.
+// My ads (#/my-ads): every ad so far, the slides library and the grade templates.
 
-function listView() {
+function libraryView() {
   const ads = state.ads;
   const nums = adNumbers(ads);
   return `
-    <div class="page-head">
-      <div>
-        <h1>Ads Editor</h1>
-        <p class="muted">Drop in raw ad footage and say what you want. It cuts the retakes and dead air, grades it, adds motion graphics, captions and sound effects, then shows you the result.</p>
-      </div>
-    </div>
+    <header class="lib-head">
+      <div><h1>My ads</h1><p>${ads.length ? `${ads.length} ad${ads.length === 1 ? "" : "s"} · ${mb(ads.reduce((t, a) => t + (a.sizeBytes || 0), 0))} on disk` : "Everything you create lands here."}</p></div>
+      <a class="btn primary lib-new" href="#/ads">${ICON.plus} New ad</a>
+    </header>
     ${state.config && !state.config.claude ? `<div class="banner">Claude isn't connected, so edits are a clean tighten with a few graphics. Add your key in Integrations for the full edit.</div>` : ""}
-    <div class="card ad-batch">
-      <label class="field"><span>Brief for these uploads <em>(optional, applies to every video you drop in)</em></span>
-        <textarea id="ad-batch-prompt" rows="2" placeholder="e.g. Problem-aware ads for ATLAS. Cut every retake, pop up the numbers, end on the click button.">${esc(state.batch.prompt)}</textarea>
-      </label>
-      <div class="ad-toggles">
-        <label class="toggle"><input type="checkbox" id="ad-batch-auto" ${state.batch.auto ? "checked" : ""} /><span class="track"></span>Edit them automatically</label>
-        <label class="toggle"><input type="checkbox" id="ad-batch-save" ${state.batch.save ? "checked" : ""} ${state.batch.auto ? "" : "disabled"} /><span class="track"></span>Save the videos when done</label>
-      </div>${gradeSettings(state.config || {})}
-    </div>
-    <label class="dropzone ad-drop" id="ad-drop">
-      <input type="file" accept="video/*" multiple hidden id="ad-file" />
-      ${state.uploading
-        ? `<div class="ad-up"><b>Uploading ${state.uploading.total > 1 ? `${state.uploading.index} of ${state.uploading.total}: ` : ""}${esc(state.uploading.name)}</b><div class="ad-bar"><i style="width:${state.uploading.pct}%"></i></div><span class="muted small">${state.uploading.pct}%</span></div>`
-        : `${ICON.upload}<b>Upload your ad footage</b><span class="muted small">Drag one or more videos here, or click to choose. Raw takes are fine.</span>`}
-    </label>
-    <h3 class="ad-h">Your ads ${ads.length ? `<span class="muted small">· ${ads.length} ad${ads.length === 1 ? "" : "s"}, ${mb(ads.reduce((t, a) => t + (a.sizeBytes || 0), 0))} on disk</span>` : ""}</h3>
     <div class="ad-grid">
       ${ads.length ? bulkBar(ads) : ""}
       ${ads.length
@@ -190,15 +268,309 @@ function listView() {
         </a>`,
             )
             .join("")
-        : `<div class="empty">No ads yet. Upload footage above to make your first one.</div>`}
+        : `<div class="empty ad-empty"><b>No ads yet</b><span>Pick a style in <a href="#/ads">Ad studio</a> to make your first one.</span></div>`}
     </div>
-    <h3 class="ad-h">Slides <span class="muted small">· your decks and product screens. Edits drop one in when the speaker talks about what it shows.</span></h3>
+    <div class="ad-section-head ad-slides-head">
+      <h3>Slides</h3>
+      <span class="muted small">Your decks and product screens. Edits drop one in when the speaker talks about what it shows.</span>
+    </div>
     <div class="ad-logo-row ad-slides">
       ${state.slides
         .map((sl) => `<div class="ad-logo ad-slide-tile" data-slide="${sl.id}"><img src="${esc(sl.url)}" alt="" loading="lazy" /><input value="${esc(sl.name)}" title="What this slide shows" /><button class="ad-logo-x" data-slide-del="${sl.id}" title="Delete this slide">×</button></div>`)
         .join("")}
       <label class="ad-logo add ad-slide-tile"><input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden id="ad-slide-file" />+ Add slides</label>
+    </div>
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Ad studio (#/ads): watch a style's before and after, pick it, then upload. Two steps share the right-hand panel
+// (they slide); the stage on the left plays the chosen style's example ad.
+
+/** A frame of the latest upload: the newest ad's footage, else the newest video in the app, else none (placeholder). */
+const latestFrame = () => state.ads.find((a) => a.project?.poster)?.project.poster || state.anyFrame || null;
+const brand = () => state.brand || { name: "Your brand", initials: "AD" };
+/** Words wrapped for a word-by-word reveal (--i is each word's place). */
+const words = (text, from = 0) => text.split(" ").map((w, i) => `<i style="--i:${from + i}">${esc(w)}</i>`).join(" ");
+const styleOf = (id) => STYLES.find((x) => x.id === id) || STYLES[0];
+const thumbOf = (st) => st.example?.poster || latestFrame();
+const clock = (t) => (Number.isFinite(t) ? `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}` : "00:00");
+const thumb = (st) => `<span class="st-thumb${thumbOf(st) ? "" : " blank"}">${thumbOf(st) ? `<img src="${esc(thumbOf(st))}" alt="" loading="lazy" />` : ""}</span>`;
+
+function studioView() {
+  const st = styleOf(state.batch.editStyle);
+  const { mode, step } = state.studio;
+  return `
+    ${state.config && !state.config.claude ? `<div class="banner">Claude isn't connected, so edits are a clean tighten with a few graphics. Add your key in Integrations for the full edit.</div>` : ""}
+    <div class="st${step === "upload" ? " step-upload" : ""}" data-mode="${mode}">
+      <section class="st-stage">
+        <div class="st-top">
+          <header class="st-hero"><h1>See your next ad.</h1><p>Same footage. A better edit.</p></header>
+          <div class="st-seg" role="tablist" aria-label="Preview">
+            <span class="st-seg-thumb" aria-hidden="true"></span>
+            <button type="button" role="tab" data-mode="compare" aria-selected="${mode === "compare"}">Comparison</button>
+            <button type="button" role="tab" data-mode="meta" aria-selected="${mode === "meta"}">Meta preview</button>
+          </div>
+        </div>
+        <div class="st-show${st.example ? "" : " no-video"}" id="st-show">${showcase(st)}</div>
+        <div class="st-transport" id="st-transport"${st.example ? "" : " hidden"}>${transport()}</div>
+      </section>
+      <aside class="st-panel" aria-label="Create">
+        <div class="st-slider">
+          <div class="st-step st-pick"${step === "upload" ? " inert" : ""}>${pickStep()}</div>
+          <div class="st-step st-up" id="st-up"${step === "upload" ? "" : " inert"}>${uploadStep()}</div>
+        </div>
+      </aside>
     </div>`;
+}
+
+/** The chosen style's example: Before (its raw footage, when added) beside the After in a Reels frame. */
+function showcase(st) {
+  const b = brand();
+  const ex = st.example;
+  const before = !ex
+    ? ""
+    : ex.before
+      ? `<video class="st-v" data-role="before" src="${esc(ex.before)}" muted playsinline preload="auto"></video>`
+      : `<img class="st-v dim" src="${esc(ex.poster)}" alt="" /><span class="st-soon">Raw footage<br />coming soon</span>`;
+  const frame = latestFrame();
+  const after = ex
+    ? `<video class="st-v" data-role="after" src="${esc(ex.video)}" poster="${esc(ex.poster)}" playsinline preload="auto"></video>`
+    : `${frame ? `<img class="st-v dim" src="${esc(frame)}" alt="" />` : `<span class="st-v st-blank"></span>`}
+       <div class="sp-cx"><span class="sp-cx-card"><small>Your brief</small><b>${words("Made your way.")}</b><em>Tell us the pace, the captions, the feel.</em></span></div>`;
+  return `
+    ${ex ? `<figure class="st-card st-before"><span class="st-pill"><i class="red"></i>Before</span><div class="st-frame">${before}</div></figure>` : ""}
+    <figure class="st-card st-after"><span class="st-pill"><i class="green"></i>After</span>
+      <div class="st-frame reel"${ex ? ' data-act="toggle"' : ""}>${after}
+        <div class="reel-top"><span class="reel-av">${esc(b.initials)}</span><span class="reel-who"><b>${esc(b.name)}</b><small>Sponsored</small></span><span class="reel-more">${ICON.dots}</span></div>
+        <div class="reel-side">${ICON.heart}${ICON.comment}${ICON.send}</div>
+        <div class="reel-cta">Learn more ${ICON.chevR}</div>
+      </div>
+    </figure>`;
+}
+
+function transport() {
+  const muted = state.studio.volume === 0;
+  return `
+    <button type="button" class="st-play" data-act="play" aria-label="Play">${ICON.playT}</button>
+    <span class="st-label">${state.studio.mode === "meta" ? "Play preview" : "Play comparison"}</span>
+    <span class="st-time"><b id="st-cur">00:00</b> / <span id="st-dur">00:00</span></span>
+    <input type="range" class="st-range st-seek" id="st-seek" min="0" max="1000" value="0" aria-label="Seek" style="--p:0%" />
+    <button type="button" class="st-mute" data-act="mute" aria-label="${muted ? "Unmute" : "Mute"}">${muted ? ICON.mute : ICON.vol}</button>
+    <input type="range" class="st-range st-vol" id="st-vol" min="0" max="100" value="${Math.round(state.studio.volume * 100)}" aria-label="Volume" style="--p:${Math.round(state.studio.volume * 100)}%" />`;
+}
+
+function pickStep() {
+  const on = state.batch.editStyle;
+  return `
+    <h2>Choose your style</h2>
+    <div class="st-list" role="radiogroup" aria-label="Editing style">
+      ${STYLES.map((st) => `<button type="button" role="radio" aria-checked="${st.id === on}" class="st-row${st.id === on ? " on" : ""}" data-style="${st.id}">
+        ${thumb(st)}<span class="st-txt"><b>${st.name}</b><small>${st.short}</small></span><span class="st-radio" aria-hidden="true"></span></button>`).join("")}
+    </div>
+    <button type="button" class="st-go" data-step="upload">Use this template ${ICON.arrow}</button>
+    <p class="st-next">Next: upload your footage</p>`;
+}
+
+function uploadStep() {
+  const st = styleOf(state.batch.editStyle);
+  const staged = state.staged;
+  return `
+    <button type="button" class="st-back" data-step="pick">${ICON.back} Change style</button>
+    <div class="st-chosen">${thumb(st)}<span class="st-txt"><b>${st.name}</b><small>Ends on ${st.ends}</small></span></div>
+    <h2>Upload your footage</h2>
+    <div class="st-formats" role="radiogroup" aria-label="Format">
+      ${Object.entries(PLATFORMS).map(([k, pl]) => `<button type="button" role="radio" aria-checked="${k === state.batch.platform}" class="${k === state.batch.platform ? "on" : ""}" data-platform="${k}" title="${pl.hint}"><span class="st-shape s${pl.aspect.replace(":", "x")}"></span><b>${pl.name}</b><small>${pl.aspect}</small></button>`).join("")}
+    </div>
+    <div class="cr-drop${staged.length ? " has" : ""}${state.uploading ? " busy" : ""}" id="ad-drop">
+      <input type="file" accept="video/*" multiple hidden id="ad-file" />
+      ${state.uploading
+        ? `<div class="ad-up"><b>Uploading ${state.uploading.total > 1 ? `${state.uploading.index} of ${state.uploading.total}: ` : ""}${esc(state.uploading.name)}</b><div class="ad-bar"><i style="width:${state.uploading.pct}%"></i></div><span class="muted small">${state.uploading.pct}%</span></div>`
+        : staged.length
+          ? `<div class="cr-chips">${staged.map((f, i) => `<div class="cr-chip"><video src="${f.url}#t=0.5" muted playsinline preload="metadata"></video><span><b>${esc(f.file.name)}</b><small>${mb(f.file.size)}</small></span><button type="button" class="cr-chip-x" data-unstage="${i}" title="Remove">${ICON.close}</button></div>`).join("")}</div>
+             <label for="ad-file" class="cr-more">+ Add more</label>`
+          : `<span class="cr-drop-icon">${ICON.upload}</span><b>Drop your raw footage</b><small>or <label for="ad-file" class="cr-browse">browse files</label>. Raw takes are fine.</small>`}
+    </div>
+    <label class="cr-note"><span>Anything we should know? <em>(optional)</em></span>
+      <input id="ad-batch-prompt" autocomplete="off" placeholder="e.g. Focus on new patient sign ups, keep it under 30 seconds…" value="${esc(state.batch.prompt)}" /></label>
+    <button type="button" class="cr-go" data-act="create">${staged.length > 1 ? `Create ${staged.length} ads` : "Create ad"} ${ICON.arrow}</button>`;
+}
+
+/** Repaint just the upload step (chips, progress) so the stage keeps playing. */
+function renderUpload() {
+  const up = $("#st-up", root);
+  if (!up) return;
+  up.innerHTML = uploadStep();
+  bindDrop();
+}
+
+function setStep(step) {
+  state.studio.step = step;
+  $(".st", root)?.classList.toggle("step-upload", step === "upload");
+  $(".st-pick", root)?.toggleAttribute("inert", step === "upload");
+  $("#st-up", root)?.toggleAttribute("inert", step !== "upload");
+  if (step === "upload") renderUpload();
+}
+
+/** Swap the stage to another style: the cards fade out, the new ones rise in, the player resets. */
+function pickStyle(id) {
+  if (!STYLES.some((x) => x.id === id) || id === state.batch.editStyle) return;
+  state.batch.editStyle = id;
+  saveBatch();
+  $$(".st-row", root).forEach((r) => {
+    r.classList.toggle("on", r.dataset.style === id);
+    r.setAttribute("aria-checked", String(r.dataset.style === id));
+  });
+  const show = $("#st-show", root);
+  stopPlayer();
+  show.classList.add("out");
+  setTimeout(() => {
+    const st = styleOf(id);
+    show.innerHTML = showcase(st);
+    show.classList.toggle("no-video", !st.example);
+    const tr = $("#st-transport", root);
+    tr.hidden = !st.example;
+    tr.innerHTML = transport();
+    show.classList.remove("out");
+    $(".st", root)?.classList.remove("is-playing");
+    wirePlayer();
+  }, 220);
+}
+
+let player = null;
+function stopPlayer() {
+  player?.after?.pause();
+  player?.before?.pause();
+}
+
+/** One control bar for both videos: the After carries the sound, the Before (raw) plays along muted. */
+function wirePlayer() {
+  const after = $('[data-role="after"]', root);
+  const before = $('[data-role="before"]', root);
+  player = { after, before };
+  if (!after) return;
+  const btn = $(".st-play", root);
+  const seek = $("#st-seek", root);
+  const vol = $("#st-vol", root);
+  after.volume = state.studio.volume;
+  after.muted = state.studio.volume === 0;
+  const paint = () => {
+    const d = after.duration || 0;
+    const p = d ? (after.currentTime / d) * 100 : 0;
+    $("#st-cur", root).textContent = clock(after.currentTime);
+    $("#st-dur", root).textContent = clock(d);
+    if (!seek.matches(":active")) seek.value = Math.round(p * 10);
+    seek.style.setProperty("--p", `${p}%`);
+    if (before && before.duration && Math.abs(before.currentTime - Math.min(after.currentTime, before.duration)) > 0.35) before.currentTime = Math.min(after.currentTime, before.duration - 0.05);
+  };
+  const playing = (on) => {
+    btn.innerHTML = on ? ICON.pause : ICON.playT;
+    btn.setAttribute("aria-label", on ? "Pause" : "Play");
+    $(".st", root)?.classList.toggle("is-playing", on);
+  };
+  after.onloadedmetadata = paint;
+  after.ontimeupdate = paint;
+  after.onplay = () => (playing(true), before?.play().catch(() => {}));
+  after.onpause = () => (playing(false), before?.pause());
+  after.onended = () => (playing(false), before?.pause());
+  seek.oninput = () => {
+    if (after.duration) after.currentTime = (seek.value / 1000) * after.duration;
+    paint();
+  };
+  vol.oninput = () => {
+    state.studio.volume = vol.value / 100;
+    after.volume = state.studio.volume;
+    after.muted = state.studio.volume === 0;
+    vol.style.setProperty("--p", `${vol.value}%`);
+    $(".st-mute", root).innerHTML = after.muted ? ICON.mute : ICON.vol;
+  };
+}
+
+function togglePlay() {
+  const after = player?.after;
+  if (!after) return;
+  if (after.paused) after.play().catch(() => {});
+  else after.pause();
+}
+
+function bindStudio() {
+  bindDrop();
+  wirePlayer();
+  root.ondragover = (e) => e.dataTransfer?.types?.includes("Files") && e.preventDefault();
+  root.ondrop = (e) => {
+    if (e.target.closest("#ad-drop") || !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    setStep("upload");
+    stage([...e.dataTransfer.files]);
+  };
+  root.oninput = (e) => {
+    if (e.target.id === "ad-batch-prompt") (state.batch.prompt = e.target.value), saveBatch();
+  };
+  root.onkeydown = (e) => e.target.id === "ad-batch-prompt" && e.key === "Enter" && createAds();
+  root.onclick = (e) => {
+    const row = e.target.closest("[data-style]");
+    if (row) return pickStyle(row.dataset.style);
+    const step = e.target.closest("[data-step]");
+    if (step) return setStep(step.dataset.step);
+    const mode = e.target.closest(".st-seg [data-mode]");
+    if (mode) {
+      if (mode.dataset.mode === state.studio.mode) return;
+      state.studio.mode = mode.dataset.mode;
+      $(".st", root).dataset.mode = state.studio.mode;
+      $$(".st-seg [data-mode]", root).forEach((m) => m.setAttribute("aria-selected", String(m.dataset.mode === state.studio.mode)));
+      const label = $(".st-label", root);
+      if (label) label.textContent = state.studio.mode === "meta" ? "Play preview" : "Play comparison";
+      return;
+    }
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "play" || act === "toggle") return togglePlay();
+    if (act === "mute") {
+      const vol = $("#st-vol", root);
+      vol.value = state.studio.volume === 0 ? 80 : 0;
+      return vol.oninput();
+    }
+    if (act === "create") return createAds();
+    const plat = e.target.closest("[data-platform]");
+    if (plat) {
+      state.batch.platform = PLATFORMS[plat.dataset.platform] ? plat.dataset.platform : "instagram";
+      saveBatch();
+      return renderUpload();
+    }
+    const unstage = e.target.closest("[data-unstage]");
+    if (unstage) {
+      const [gone] = state.staged.splice(Number(unstage.dataset.unstage), 1);
+      if (gone) URL.revokeObjectURL(gone.url);
+      return renderUpload();
+    }
+  };
+}
+
+/** Hold dropped or chosen videos until Create ad (or straight away when Create ad asked for them). */
+function stage(files) {
+  const videos = files.filter(isVideo);
+  if (!videos.length) return toast("Drop video files.");
+  state.staged.push(...videos.map((file) => ({ file, url: URL.createObjectURL(file) })));
+  if (state.pickThenCreate) {
+    state.pickThenCreate = false;
+    return createAds();
+  }
+  renderUpload();
+}
+
+async function createAds() {
+  if (state.uploading) return;
+  if (!state.staged.length) {
+    state.pickThenCreate = true;
+    $("#ad-file", root)?.click();
+    return;
+  }
+  const staged = state.staged;
+  stopPlayer();
+  await uploadAll(staged.map((f) => f.file));
+  staged.forEach((f) => URL.revokeObjectURL(f.url));
+  state.staged = state.staged.filter((f) => !staged.includes(f));
+  state.studio.step = "pick";
+  location.hash = "#/my-ads"; // watch them edit
 }
 
 /** Watch the saved MP4 (the file Download gives you) in a popup: the true final, no live-preview stutter. */
@@ -228,54 +600,6 @@ const OFFER_CHOICES = () => state.config?.offers || {
   trial: { label: "ATLAS · 7-day free trial", cta: "Start Your 7 Day Free Trial" },
   call: { label: "Book a call", cta: "Book a call" },
 };
-const OFFER_HINT = {
-  trial: "Ends on \u201cStart your 7-day free trial\u201d \u00b7 app.atlas-ai.club",
-  call: "Ends on \u201cBook your free call\u201d",
-};
-
-/**
- * Asked every time videos are dropped in: how these ads end. Resolves with "trial" / "call", or null when cancelled.
- * The last choice is preselected (remembered in this browser).
- */
-function chooseOffer(count) {
-  return new Promise((resolve) => {
-    const offers = OFFER_CHOICES();
-    let pick = offers[state.batch.offer] ? state.batch.offer : "trial";
-    const box = document.createElement("div");
-    box.className = "ad-watch ad-offer";
-    const paint = () => {
-      box.innerHTML = `<div class="ad-watch-card ad-offer-card" role="dialog" aria-label="How should these ads end?">
-          <div class="ad-watch-head"><b>How should ${count === 1 ? "this ad" : `these ${count} ads`} end?</b><button class="ad-watch-x" data-offer-cancel title="Cancel">${ICON.close}</button></div>
-          <div class="ad-offer-list">${Object.entries(offers).map(([k, o]) => `<button class="ad-offer-opt${k === pick ? " on" : ""}" data-offer="${k}" aria-pressed="${k === pick}"><b>${esc(o.label)}</b><span class="muted small">${esc(OFFER_HINT[k] || o.cta)}</span></button>`).join("")}</div>
-          <p class="muted small">Every CTA, end card and closing line sells this one offer. You can change it per ad later.</p>
-          <div class="ad-offer-foot"><button class="btn ghost" data-offer-cancel>Cancel</button><button class="btn primary" data-offer-go>${ICON.upload}<span>Upload ${count === 1 ? "video" : `${count} videos`}</span></button></div>
-        </div>`;
-    };
-    const done = (v) => {
-      box.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(v);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") done(null);
-      if (e.key === "Enter") done(pick);
-    };
-    box.addEventListener("click", (e) => {
-      const opt = e.target.closest("[data-offer]");
-      if (opt) {
-        pick = opt.dataset.offer;
-        paint();
-        return;
-      }
-      if (e.target.closest("[data-offer-go]")) done(pick);
-      else if (e.target === box || e.target.closest("[data-offer-cancel]")) done(null);
-    });
-    document.addEventListener("keydown", onKey);
-    paint();
-    document.body.append(box);
-    $("[data-offer-go]", box)?.focus();
-  });
-}
 
 /** Select all / some ads, then download (one zip) or delete them together. */
 function bulkBar(ads) {
@@ -330,15 +654,17 @@ const isVideo = (f) => f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$
 function bindDrop() {
   const drop = $("#ad-drop", root);
   const input = $("#ad-file", root);
-  input.addEventListener("change", () => input.files.length && uploadAll([...input.files].filter(isVideo)));
+  if (!drop || !input) return;
+  input.addEventListener("change", () => {
+    if (input.files.length) stage([...input.files]);
+    else state.pickThenCreate = false;
+  });
   drop.addEventListener("dragover", (e) => (e.preventDefault(), drop.classList.add("over")));
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("over");
-    const files = [...(e.dataTransfer?.files || [])].filter(isVideo);
-    if (files.length) uploadAll(files);
-    else toast("Drop video files.");
+    stage([...(e.dataTransfer?.files || [])]);
   });
 }
 
@@ -355,8 +681,8 @@ async function deleteAd(ad) {
   }
 }
 
-function bindList() {
-  bindDrop();
+function bindLibrary() {
+  root.ondragover = root.ondrop = root.oninput = root.onkeydown = null;
   root.onclick = async (e) => {
     const play = e.target.closest("[data-play]");
     if (play) {
@@ -403,13 +729,11 @@ function bindList() {
   root.querySelectorAll("[data-slide] input").forEach((inp) =>
     inp.addEventListener("change", () => api(`/slides/${inp.closest("[data-slide]").dataset.slide}`, { method: "PATCH", body: { name: inp.value } }).catch((err) => toast(err.message))),
   );
-  $("#ad-batch-prompt", root).addEventListener("input", (e) => ((state.batch.prompt = e.target.value), saveBatch()));
-  $("#ad-batch-auto", root).addEventListener("change", (e) => {
-    state.batch.auto = e.target.checked;
-    $("#ad-batch-save", root).disabled = !e.target.checked;
-    saveBatch();
+  $("#ad-settings", root)?.addEventListener("toggle", (e) => {
+    try {
+      localStorage.setItem("ads-settings-open", e.target.open ? "1" : "0");
+    } catch {}
   });
-  $("#ad-batch-save", root).addEventListener("change", (e) => ((state.batch.save = e.target.checked), saveBatch()));
   const saveGrades = async (body) => {
     try {
       Object.assign(state.config, await api("/settings", { method: "PUT", body }));
@@ -446,16 +770,14 @@ function sendFile(file, onPct) {
 }
 
 /**
- * Upload videos one after another. Each becomes an ad; with "Edit them automatically" on, each goes straight into
- * the edit queue with the batch brief (and is saved when done, if asked). One video with auto-edit off opens its page.
+ * Upload videos one after another. Each becomes an ad in the chosen editing style and platform format, and goes
+ * straight into the edit queue with the batch note, saved when done. The style also decides the ending (its offer).
  */
 async function uploadAll(files) {
-  if (state.uploading || !files.length) return;
-  const offer = await chooseOffer(files.length);
-  if (!offer) return;
-  state.batch.offer = offer;
-  saveBatch();
-  const { auto, save, prompt } = state.batch;
+  if (state.uploading || !files.length) return false;
+  const { auto, save, prompt, editStyle } = state.batch;
+  const offer = STYLES.find((st) => st.id === editStyle)?.offer || "trial"; // the style decides how the ad ends
+  const aspect = PLATFORMS[state.batch.platform]?.aspect || "9:16";
   let last = null;
   let done = 0;
   for (const [i, file] of files.entries()) {
@@ -470,8 +792,8 @@ async function uploadAll(files) {
           bar.parentNode.nextElementSibling.textContent = `${pct}%`;
         }
       });
-      last = await api("/", { method: "POST", body: { projectId: project.id, name: file.name, aspect: "9:16", options: { offer } } });
-      if (auto) await api(`/${last.id}/edit`, { method: "POST", body: { prompt, aspect: "9:16", options: { grade: "auto", lut: "none", offer }, autoSave: save } });
+      last = await api("/", { method: "POST", body: { projectId: project.id, name: file.name, aspect, options: { offer, editStyle } } });
+      if (auto) await api(`/${last.id}/edit`, { method: "POST", body: { prompt, aspect, options: { grade: "auto", lut: "none", offer, editStyle }, autoSave: save } });
       done++;
     } catch (err) {
       toast(`${file.name}: ${err.message}`);
@@ -482,8 +804,8 @@ async function uploadAll(files) {
     location.hash = `#/ads/${last.id}`;
     return;
   }
-  toast(auto ? `${done} video${done === 1 ? "" : "s"} uploaded and queued for editing${save ? " (they'll be saved when done)" : ""}.` : `${done} video${done === 1 ? "" : "s"} uploaded.`);
-  await refresh(true);
+  toast(auto ? `${done} video${done === 1 ? "" : "s"} uploaded and queued for editing as ${STYLES.find((st) => st.id === editStyle)?.name || "an ad"} (${aspect})${save ? ", saved when done" : ""}.` : `${done} video${done === 1 ? "" : "s"} uploaded.`);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -501,14 +823,14 @@ function adView(ad) {
 
   let stage;
   if (ready && ad.previewUrl) {
-    stage = `<hyperframes-player controls autoplay src="${esc(ad.previewUrl)}?rev=${ad.rev || 0}" width="${ad.aspect === "16:9" ? 1920 : 1080}" height="${{ "9:16": 1920, "4:5": 1350, "1:1": 1080, "16:9": 1080 }[ad.aspect] || 1920}"></hyperframes-player>`;
+    stage = `<hyperframes-player controls autoplay src="${esc(ad.previewUrl)}?rev=${ad.rev || 0}&grade=${esc(ad.lutInUse || "")}" width="${ad.aspect === "16:9" ? 1920 : 1080}" height="${{ "9:16": 1920, "4:5": 1350, "1:1": 1080, "16:9": 1080 }[ad.aspect] || 1920}"></hyperframes-player>${lookOverlay(ad)}`;
   } else {
     const line = busy ? ad.message || "Working…" : processing ? ad.project.message || "Getting the video ready…" : ad.status === "error" ? "" : "Describe what you want, then press Edit my ad.";
     stage = `<div class="ad-stage-empty">${ad.project ? `<img src="${esc(ad.project.poster)}" alt="" onerror="this.remove()" />` : ""}<div class="ad-stage-msg">${busy || processing ? `<i class="ad-spin"></i>` : ""}<span>${esc(line)}</span></div></div>`;
   }
 
   return `
-    <a class="back" href="#/ads">${ICON.back} All ads</a>
+    <a class="back" href="#/my-ads">${ICON.back} My ads</a>
     <div class="page-head ad-head">
       <div>
         <div class="ad-title-row">${num ? `<span class="ad-num head" title="Video ${num}">${num}</span>` : ""}<h1 contenteditable="plaintext-only" spellcheck="false" id="ad-name" title="Rename">${esc(ad.name)}</h1></div>
@@ -541,9 +863,11 @@ function adView(ad) {
           <label class="field"><span>${ready ? "Want changes? Describe the new edit" : "What should this ad do?"}</span>
             <textarea id="ad-prompt" rows="5" placeholder="e.g. Problem-aware ad for chiropractors. Cut all the retakes, keep it under 35s, pop up the numbers, end with 'Book a free strategy call'." ${busy ? "disabled" : ""}>${esc(ad.prompt || "")}</textarea>
           </label>
-          <p class="muted small">Always applied: cut every retake, under 30 s, big numbers, a checklist of the 3 main points, the strongest hook first, and an ending that sells the offer below. Sound effects, music and captions start on.</p>
-          <div class="ad-ideas">${IDEAS.map((i) => `<button class="chip chip-link" data-idea="${esc(i)}" ${busy ? "disabled" : ""}>+ ${esc(i)}</button>`).join("")}</div>
-          <div class="field ad-logos"><span>Brand logos <em>— when the brand is named, its logo pops up</em></span>
+          ${opts.editStyle === "talking-head"
+            ? `<p class="muted small">Basic (talking head): every flub, retake and pause cut, white captions in the middle, the shot following your face, and a pop-in on the lines that matter. No graphics or sound effects; music starts off.</p>`
+            : `<p class="muted small">Always applied: cut every retake, under 30 s, big numbers, a checklist of the 3 main points, the strongest hook first, and an ending that sells the offer below. Sound effects, music and captions start on.</p>
+          <div class="ad-ideas">${IDEAS.map((i) => `<button class="chip chip-link" data-idea="${esc(i)}" ${busy ? "disabled" : ""}>+ ${esc(i)}</button>`).join("")}</div>`}
+          <div class="field ad-logos" ${opts.editStyle === "talking-head" ? "hidden" : ""}><span>Brand logos <em>— when the brand is named, its logo pops up</em></span>
             <div class="ad-logo-row">
               ${(ad.logos || []).map((l) => `<div class="ad-logo" data-logo="${esc(l.id)}"><img src="${API}/${ad.id}/logos/${encodeURIComponent(l.file)}" alt="" /><input value="${esc(l.name)}" data-logo-name title="The brand name as it's said" /><button class="ad-logo-x" data-logo-del title="Remove">×</button></div>`).join("")}
               <label class="ad-logo add" title="Add logos (PNG with a transparent background works best)"><input type="file" accept="image/*" multiple hidden id="ad-logo-file" /><span>+</span><small>Add logo</small></label>
@@ -551,7 +875,6 @@ function adView(ad) {
           </div>
           <div class="ad-opts">
             <div class="field"><span>Format</span><div class="segmented" data-seg="aspect">${Object.entries(cfg.aspects || { "9:16": "" }).map(([k, hint]) => `<button data-aspect="${k}" class="${ad.aspect === k ? "on" : ""}" title="${esc(hint)}">${k}</button>`).join("")}</div></div>
-            <label class="field"><span>Color grade</span>${gradeSelect(ad, cfg)}</label>
             <label class="field"><span>Ending</span><select id="ad-offer">${Object.entries(OFFER_CHOICES()).map(([k, o]) => `<option value="${k}" ${(opts.offer || "trial") === k ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
           </div>
           <div class="ad-toggles">
@@ -617,19 +940,27 @@ function bindAd(ad) {
     }),
   );
 
-  // A finished ad changes grade on the spot: only the colour changes, the edit stays as it is.
+  // A finished ad changes grade on the spot: only the colour changes, the edit stays as it is. A LUT shows at once
+  // as a still of the current frame; the player switches when the graded preview video is ready (a few seconds).
+  // Picking again before then is fine: only the last pick is applied.
   $("#ad-grade", root)?.addEventListener("change", async (e) => {
     if (ad.status !== "ready" || working(ad)) return;
     const select = e.target;
-    select.disabled = true;
-    toast("Changing the color grade…");
+    const lut = lutOf(select.value, state.config || {});
+    const pick = { id: ad.id, name: select.selectedOptions[0]?.textContent || "New grade", url: lut ? `${API}/${ad.id}/look.jpg?lut=${encodeURIComponent(lut)}&t=${previewSourceTime().toFixed(2)}` : null };
+    state.look = lut ? pick : null;
+    $(".ad-look", root)?.remove();
+    if (lut) $(".ad-stage", root)?.insertAdjacentHTML("beforeend", lookOverlay(ad));
     try {
       await api(`/${ad.id}/grade`, { method: "POST", body: { options: gradeOptionsFrom(select.value) } });
+      if (state.look && state.look !== pick) return; // a newer pick is on its way
+      state.look = null;
       toast(ad.video ? "Grade changed. Save the video again to bake it in." : "Grade changed.");
       await refresh(true);
     } catch (err) {
+      if (state.look === pick) state.look = null;
+      $(".ad-look", root)?.remove();
       toast(err.message);
-      select.disabled = false;
     }
   });
 
@@ -640,7 +971,8 @@ function bindAd(ad) {
     try {
       if (act === "edit") {
         if (ad.handEdited && !confirm("You've edited this ad in the timeline. Re-editing rebuilds it from scratch (your version is backed up first). Continue?")) return;
-        const options = gradeOptionsFrom($("#ad-grade", root).value);
+        // No colour grade or LUT on any ad (the footage comes in already coloured): the picker is gone.
+        const options = gradeOptionsFrom("grade:none");
         $$("[data-opt]", root).forEach((t) => (options[t.dataset.opt] = t.checked));
         options.offer = $("#ad-offer", root)?.value || "trial";
         await api(`/${ad.id}/edit`, { method: "POST", body: { prompt: prompt.value, aspect, options } });
@@ -666,31 +998,36 @@ function bindAd(ad) {
 // ---------------------------------------------------------------------------
 
 let drawnKey = "";
+const viewOf = () => (location.hash.startsWith("#/my-ads") ? "library" : idFromHash() ? "ad" : "studio");
 function draw(force = true) {
   if (!root) return;
-  const id = idFromHash();
-  if (!id) {
-    // Already showing the list: swap only the cards and the upload box, so the brief being typed isn't lost.
-    if (drawnKey === "list" && $(".ad-grid", root)) {
-      const next = document.createElement("div");
-      next.innerHTML = listView();
-      $(".ad-grid", root).replaceWith($(".ad-grid", next));
-      const drop = $("#ad-drop", root);
-      const fresh = $("#ad-drop", next);
-      if (drop.innerHTML !== fresh.innerHTML && !$("input:focus", drop)) {
-        drop.replaceWith(fresh);
-        bindDrop();
-      }
-      return;
-    }
-    root.innerHTML = listView();
-    bindList();
-    drawnKey = "list";
+  const view = viewOf();
+  if (view === "studio") {
+    // Drawn once per visit so the example keeps playing; later redraws only repaint the upload step's progress.
+    if (drawnKey === "studio" && $(".st", root)) return state.uploading && renderUpload();
+    root.innerHTML = studioView();
+    bindStudio();
+    drawnKey = "studio";
     return;
   }
+  if (view === "library") {
+    // Already showing: swap only the cards, so a selection or a typed slide name isn't lost.
+    if (drawnKey === "library" && $(".ad-grid", root)) {
+      const next = document.createElement("div");
+      next.innerHTML = libraryView();
+      $(".ad-grid", root).replaceWith($(".ad-grid", next));
+      $(".lib-head p", root).replaceWith($(".lib-head p", next));
+      return;
+    }
+    root.innerHTML = libraryView();
+    bindLibrary();
+    drawnKey = "library";
+    return;
+  }
+  const id = idFromHash();
   const ad = state.ads.find((a) => a.id === id);
   if (!ad) {
-    root.innerHTML = `<a class="back" href="#/ads">${ICON.back} All ads</a><div class="empty">That ad isn't here any more.</div>`;
+    root.innerHTML = `<a class="back" href="#/my-ads">${ICON.back} My ads</a><div class="empty">That ad isn't here any more.</div>`;
     return;
   }
   // Redraw only when something visible changed, so typing in the brief and the playing preview aren't reset.
@@ -708,6 +1045,15 @@ function draw(force = true) {
   bindAd(ad);
 }
 
+/** The name and initials on the example posts: the first posting account, else a neutral stand-in. */
+async function loadBrand() {
+  const accounts = await fetch("/api/accounts").then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const a = accounts[0];
+  const name = a?.name || (a?.handle ? `@${a.handle.replace(/^@/, "")}` : "") || "Your brand";
+  const initials = name.replace(/^@/, "").split(/[\s._-]+/).filter(Boolean).slice(0, 3).map((w) => w[0]).join("").toUpperCase() || "AD";
+  return { name, initials: initials.length === 1 ? name.replace(/^@/, "").slice(0, 2).toUpperCase() : initials };
+}
+
 async function refresh(force = false) {
   try {
     const data = await api("/");
@@ -715,6 +1061,8 @@ async function refresh(force = false) {
     state.ads = data.ads;
     for (const id of state.selected) if (!state.ads.some((a) => a.id === id)) state.selected.delete(id);
     state.slides = (await api("/slides").catch(() => ({ slides: [] }))).slides;
+    if (!state.brand) state.brand = await loadBrand();
+    if (state.anyFrame === undefined) state.anyFrame = await fetch("/api/projects").then((r) => (r.ok ? r.json() : [])).then((list) => list.find((x) => x.poster)?.poster || null).catch(() => null);
   } catch (err) {
     if (root) root.innerHTML = `<div class="empty">Couldn't load the Ads Editor: ${esc(err.message)}</div>`;
     return;

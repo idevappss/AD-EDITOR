@@ -1,4 +1,4 @@
-// Instagram for HBA Content Backend: account connection, the PUBLISHERS.instagram publisher, composer helpers and upkeep.
+// Instagram for Ads Editor: account connection, the PUBLISHERS.instagram publisher, composer helpers and upkeep.
 // How it plugs in and what it guarantees: shared/CONTRACT.md
 import path from "node:path";
 import crypto from "node:crypto";
@@ -63,7 +63,7 @@ export function createInstagramIntegration({ dataDir, projectsDir, env = process
     });
   }
 
-  /** Next open posting times for a HBA Content Backend account, skipping `taken` (ISO strings already booked). */
+  /** Next open posting times for an Ads Editor account, skipping `taken` (ISO strings already booked). */
   async function suggestTimes({ account, taken = [], count = 3 } = {}) {
     const conn = findConnection((await store.read()).connections, account);
     return nextSlots({
@@ -228,7 +228,7 @@ export function createInstagramIntegration({ dataDir, projectsDir, env = process
   return {
     router,
     publish: publisher.publish,
-    /** True when this HBA Content Backend account links to a connected Instagram login, i.e. publish() can post for it. */
+    /** True when this Ads Editor account links to a connected Instagram login, i.e. publish() can post for it. */
     canPublish: async (account) => Boolean(findConnection((await store.read()).connections, account)?.accessToken),
     checkReel: ({ caption, videoPath }) => check({ caption, videoPath }),
     suggestTimes,

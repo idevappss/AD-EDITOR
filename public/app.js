@@ -169,6 +169,23 @@ async function route() {
     unmountEditor = await mountEditor(app, { projectId: editMatch[1], clipId: editMatch[2] });
     return;
   }
+  // Ads Editor keeps: Ad studio and My ads, Assets, Sounds, Study, Analytics and Memory (plus the timeline editor above). A video's
+  // page (the timeline editor links back to it) goes to that video's ad; every retired page (clips home, clipping,
+  // reels, videos, scheduler, titles, thumbnails, …) lands on My ads. Their code is still here.
+  if (!(/^\/(ads|my-ads|assets|sounds|study|analytics|memory)(\/|$)/.test(pathPart) || pathPart === "/" || pathPart === "")) {
+    const videoId = pathPart.match(/^\/p\/([\w-]+)/)?.[1];
+    const ad = videoId && (await api("/api/ads/").catch(() => ({ ads: [] }))).ads?.find((a) => a.project?.id === videoId);
+    location.replace(ad ? `#/ads/${ad.id}` : "#/ads");
+    return;
+  }
+  // IRE, the Intentional Reels Editor: the takes filmed for those questions, edited against their reels (ire/).
+  if (pathPart.startsWith("/ire")) {
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "ire"));
+    const { mountIre } = await import("/api/ire/ui/ire.js");
+    await mountIre(app);
+    window.scrollTo(0, 0);
+    return;
+  }
   // Intentional reels: the questions to ask him on camera, from everything the system has read.
   if (pathPart.startsWith("/reels")) {
     $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "reels"));
@@ -200,9 +217,12 @@ async function route() {
     window.scrollTo(0, 0);
     return;
   }
-  // Ads Editor: raw ad footage in, finished ad out (ads/, owned by the Ads Editor session).
-  if (pathPart.startsWith("/ads")) {
-    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "ads"));
+  // Ads Editor: raw ad footage in, finished ad out (ads/, owned by the Ads Editor session). It's also the start page;
+  // the clips home that used to be there lives at #/home.
+  if (pathPart.startsWith("/ads") || pathPart.startsWith("/my-ads") || pathPart === "/" || pathPart === "") {
+    // Ad studio is the start page; My ads and every ad's own page sit under "My ads".
+    const navOn = pathPart.startsWith("/my-ads") || /^\/ads\/[\w-]+/.test(pathPart) ? "my-ads" : "ads";
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === navOn));
     const { mountAds } = await import("/api/ads/ui/ads.js");
     await mountAds(app);
     window.scrollTo(0, 0);
@@ -213,6 +233,15 @@ async function route() {
     $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "clipping"));
     const { mountClipping } = await import("/api/clipping/ui/clipping.js");
     await mountClipping(app);
+    window.scrollTo(0, 0);
+    return;
+  }
+  // YouTube editor: a place in the Editor group, not built yet.
+  if (pathPart.startsWith("/youtube")) {
+    $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === "youtube"));
+    app.innerHTML = `
+      <div class="page-head"><div><h1>YouTube</h1><p class="muted">The YouTube editor for long-form videos.</p></div></div>
+      <div class="empty">Coming soon. Until then, import a video on Home to get clips, titles and a thumbnail.</div>`;
     window.scrollTo(0, 0);
     return;
   }
@@ -1229,7 +1258,7 @@ async function showProjects() {
   app.innerHTML = `
     <div class="page-head">
       <div><h1>Projects</h1><p class="muted">Every video you've turned into clips.</p></div>
-      <a class="btn primary" href="#/">${ICON.plus} New project</a>
+      <a class="btn primary" href="#/ads">${ICON.plus} New ad</a>
     </div>
     <section class="card audience" id="audience"></section>
     <section class="card yt-watch" id="yt-watch"></section>
@@ -1239,7 +1268,7 @@ async function showProjects() {
   const projects = await api("/api/projects").catch(() => []);
   $("#projects").innerHTML = projects.length
     ? projects.map(projectCard).join("")
-    : `<div class="empty">No projects yet. <a class="link-btn" href="#/">Upload a video →</a></div>`;
+    : `<div class="empty">No projects yet. <a class="link-btn" href="#/ads">Upload ad footage →</a></div>`;
   bindProjectDeletes($("#projects"));
 }
 
@@ -4825,6 +4854,7 @@ function openDopeEditor(editId) {
     title: e0.finish?.title ?? e0.resolved?.title ?? "",
     captions: Boolean(e0.finish?.captions),
     sfx: e0.finish?.sfx || "full",
+    graphics: e0.finish?.graphics !== false,
   };
 
   const modal = openModal(
@@ -4860,6 +4890,7 @@ function openDopeEditor(editId) {
             <div class="swatches">${EDIT_ACCENTS.map((c) => `<button type="button" class="swatch accent-swatch" data-accent="${c}" title="#${c}"><i style="background:#${c}"></i></button>`).join("")}</div>
           </div>
           <label class="toggle"><input type="checkbox" data-bool="captions" /><span class="track"></span>Captions on spoken lines</label>
+          <label class="toggle" title="The Ads Editor's motion graphics kit, with its sounds. Edits made before it came in need a re-roll to get graphics."><input type="checkbox" data-bool="graphics" /><span class="track"></span>Motion graphics</label>
         </section>
         <section class="ed-section">
           <h4>Sound</h4>
@@ -5120,11 +5151,12 @@ function renderTracks() {
   box.replaceChildren(...rows);
 }
 
-// ---------- nav badge ----------
+// ---------- nav badge (posts due; the bell is retired, so this is a no-op unless #due-badge comes back) ----------
 async function refreshBadge() {
-  const s = await api("/api/schedule/summary").catch(() => null);
   const badge = $("#due-badge");
-  if (!s || !badge) return;
+  if (!badge) return;
+  const s = await api("/api/schedule/summary").catch(() => null);
+  if (!s) return;
   badge.hidden = !s.due;
   badge.textContent = s.due;
 }
@@ -5134,8 +5166,6 @@ state.config = await api("/api/config");
 const engine = $("#engine");
 engine.textContent = state.config.claude ? "Claude connected" : "Demo mode · no Claude key";
 engine.classList.toggle("on", state.config.claude);
-refreshBadge();
-setInterval(refreshBadge, 15000);
 // A sound saved from a studied video (music/) just landed in the library.
 window.addEventListener("music:saved", () => {
   if (location.hash.startsWith("#/sounds")) loadTracks();

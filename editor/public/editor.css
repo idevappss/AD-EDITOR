@@ -466,3 +466,18 @@ body.tl-trimming, body.tl-trimming * { cursor: ew-resize !important; }
 .tl-clip.k-camera .tl-label { font-size: 10.5px; }
 .tl-clip.k-voicefx { --c: var(--k-sfx, var(--k-camera)); background: color-mix(in srgb, var(--c) 22%, var(--surface-2)); }
 .tl-clip.k-voicefx .tl-label { font-size: 10.5px; }
+
+/* Motion kit: the full-screen toggle on scene templates, and the Elements / Effects pickers (assets.js). */
+.in-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.in-check input { accent-color: var(--accent); }
+.as-kit-group { margin: 14px 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.as-kit { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 9px 11px; margin-bottom: 6px; border: 1px solid var(--ve-line); border-radius: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); color: inherit; text-align: left; cursor: pointer; }
+.as-kit:hover { border-color: var(--accent); }
+.as-kit b { font-size: 13px; font-weight: 600; }
+.as-kit small { font-size: 11.5px; line-height: 1.35; color: var(--faint); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.as-kit .as-kit-tag { align-self: flex-start; margin-top: 3px; padding: 1px 6px; border-radius: 999px; font-size: 10px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.as-sfx { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; }
+.as-sfx:hover { background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.as-sfx span { flex: 1; font-size: 13px; }
+.as-sfx button { border: 1px solid var(--ve-line); background: transparent; color: inherit; border-radius: 7px; padding: 3px 8px; font-size: 11.5px; cursor: pointer; }
+.as-sfx button:hover { border-color: var(--accent); }

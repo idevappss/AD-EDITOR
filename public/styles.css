@@ -27,46 +27,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.025em; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ============================================================================
-   App shell: sidebar + top bar
+   App shell: top bar (the main nav is "Top nav" at the end)
    ========================================================================== */
 body { background: var(--bg); }
-.sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; display: flex; flex-direction: column; width: var(--sidebar-w); padding: 20px 10px 14px; overflow-y: auto; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 70%, var(--bg)); scrollbar-width: none; }
-.sidebar::-webkit-scrollbar { display: none; }
-.brand { display: flex; align-items: center; gap: 10px; margin: 0 4px 22px; }
-.brand-mark { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--grad); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--grad-2) 70%, transparent); color: #fff; }
-.brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
-.brand-text b { font-size: 15px; font-weight: 600; letter-spacing: -0.025em; }
-.brand-text small { overflow: hidden; color: var(--faint); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+/* (the sidebar was replaced by the top nav; see "Top nav" at the end) */
 
-.nav { display: flex; flex-direction: column; gap: 2px; }
-.nav a { position: relative; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 11px; color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
-.nav a svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
-.nav a:hover { background: color-mix(in srgb, var(--surface-2) 70%, transparent); color: var(--text); }
-.nav a.on { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line), var(--highlight); color: var(--text); }
-.nav a.on svg { opacity: 1; }
-.nav-label { margin: 18px 10px 6px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; font-weight: 500; }
-.nav-badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: var(--pill); background: var(--accent); color: var(--accent-ink); font: 600 10px/1 var(--mono); }
-
-.sidebar-foot { position: sticky; bottom: -14px; display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 18px 0 14px; background: linear-gradient(transparent, color-mix(in srgb, var(--surface) 70%, var(--bg)) 22%); }
-.credits-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px 10px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--highlight); }
-.credits-bolt { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-#credits { min-width: 0; }
-#credits:empty::before { content: "Claude credits"; color: var(--muted); font-size: 13.5px; }
-.sidebar .credits-chip { display: block; height: auto; padding: 0; overflow: hidden; border: 0; background: none; color: var(--muted); font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar .credits-chip b { margin-right: 5px; color: var(--text); font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
-.sidebar .credits-chip:hover { border: 0; color: var(--text); }
-.credits-bar { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 5px; background: var(--surface-3); }
-.credits-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--text); transition: width 600ms var(--ease); }
-.credits-bar.low i { background: var(--warn); }
-.credits-btn { grid-column: 1 / -1; width: 100%; height: 36px; border-radius: 11px; }
-.sidebar-account { display: flex; align-items: center; gap: 9px; padding: 7px; border-radius: 14px; color: var(--muted); transition: background var(--fast) var(--ease); }
-.sidebar-account:hover { background: var(--surface-2); color: var(--text); }
-.sa-avatar { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 55%, var(--surface-3)), var(--surface-3)); box-shadow: inset 0 0 0 1px rgba(16, 16, 18, 0.06); color: var(--text); font-size: 13px; font-weight: 600; }
-.sa-text { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-.sa-text b { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.sa-text small { color: var(--faint); font-size: 12px; }
-
-.shell { min-height: 100vh; margin-left: var(--sidebar-w); }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 16px; height: 76px; padding: 0 32px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: saturate(140%) blur(20px); -webkit-backdrop-filter: saturate(140%) blur(20px); }
 .topbar .menu-btn { display: none; color: var(--text); }
 .search { position: relative; display: flex; flex: 0 1 520px; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 15px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); color: var(--faint); transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease); }
@@ -916,12 +881,10 @@ body.no-scroll { overflow: hidden; }
   .recent-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
 }
 @media (max-width: 1080px) {
-  .sidebar { transform: translateX(-100%); box-shadow: var(--shadow-lg); transition: transform var(--slow) var(--ease); }
-  body.nav-open .sidebar { transform: none; }
   .scrim { position: fixed; inset: 0; z-index: 29; display: block; background: rgba(16, 16, 18, 0.35); opacity: 0; pointer-events: none; transition: opacity var(--slow) var(--ease); }
   body.nav-open .scrim { opacity: 1; pointer-events: auto; }
-  .shell { margin-left: 0; }
   .topbar .menu-btn { display: grid; }
+  .side-collapse { display: none; }
   .home-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #activity-card { grid-column: 1 / -1; }
   .hh-top { grid-template-columns: 1fr; }
@@ -1076,7 +1039,72 @@ body > main { margin: 0 auto; }
 .ig-ready-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); }
 .ig-ready-row .grow { flex: 1; min-width: 0; font-size: 14px; }
 
-/* The HBA lockup — mark over CONTENT TEAM — in the sidebar */
-.brand { align-items: center; gap: 10px; }
-.brand-logo { display: block; flex: none; width: auto; height: 64px; object-fit: contain; }
-body > .topbar .brand-logo { height: 40px; }
+/* Top bar: a compact search that opens on focus (⌘K), the Claude status and the account initials. */
+.search { flex: 0 1 auto; width: 44px; padding: 0 0 0 13px; overflow: hidden; cursor: pointer; transition: width var(--slow) var(--ease), border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease); }
+.search > svg { flex: none; color: var(--text-2); }
+.search input, .search kbd { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.search:focus-within { width: min(440px, 100%); padding-right: 8px; overflow: visible; cursor: text; }
+.search:focus-within input, .search:focus-within kbd { opacity: 1; }
+.top-avatar { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #121214; box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--line-2); color: #fff; font-size: 13px; font-weight: 650; letter-spacing: 0.02em; transition: transform var(--fast) var(--ease); }
+.top-avatar:hover { transform: scale(1.05); }
+
+/* ============================================================================
+   Top nav: ATLAS, Ad studio / My ads / Assets with a gliding underline, search,
+   Claude status and the avatar menu (the other pages, Integrations, credits).
+   ========================================================================== */
+body { min-height: 100vh; }
+.nt { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 40px; height: 64px; padding: 0 clamp(16px, 3vw, 40px); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: saturate(160%) blur(18px); -webkit-backdrop-filter: saturate(160%) blur(18px); }
+.nt-brand { display: inline-flex; flex: none; align-items: center; gap: 10px; color: var(--text); font-size: 19px; font-weight: 800; letter-spacing: 0.06em; }
+.nt-logo { transition: transform var(--slow) var(--ease); }
+.nt-brand:hover .nt-logo { transform: rotate(-8deg) scale(1.06); }
+.nt-links { position: relative; display: flex; align-items: center; gap: 34px; align-self: stretch; }
+.nt-links a { display: flex; align-items: center; height: 100%; color: var(--muted); font-size: 14.5px; font-weight: 500; transition: color var(--fast) var(--ease); }
+.nt-links a:hover { color: var(--text); }
+.nt-links a.on { color: var(--text); font-weight: 600; }
+.nt-links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+.nt-ink { position: absolute; left: 0; bottom: -1px; width: 0; height: 2.5px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0; transition: transform 420ms var(--ease), width 420ms var(--ease), opacity var(--fast); pointer-events: none; }
+.nt-end { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.nt .search { height: 40px; border-radius: 12px; }
+.nt .engine { margin: 0; font-size: 12.5px; }
+.nt-me { position: relative; }
+.nt-me-btn { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 3px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; transition: background var(--fast) var(--ease); }
+.nt-me-btn:hover, .nt-me-btn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.nt-me-btn.on .top-avatar { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.nt-me-btn .top-avatar { width: 38px; height: 38px; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--line-2); }
+.nt-caret { transition: transform var(--fast) var(--ease); }
+.nt-me-btn[aria-expanded="true"] .nt-caret { transform: rotate(180deg); }
+.nt-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 50; display: flex; flex-direction: column; gap: 2px; width: 248px; padding: 8px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 24px 60px -20px rgba(16, 16, 18, 0.3), 0 2px 6px rgba(16, 16, 18, 0.05); transform-origin: top right; animation: nt-pop 220ms var(--ease); }
+.nt-pop[hidden] { display: none; }
+@keyframes nt-pop { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
+.nt-pop a { display: flex; align-items: center; gap: 11px; height: 40px; padding: 0 11px; border-radius: 10px; color: var(--text-2); font-size: 14px; font-weight: 500; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
+.nt-pop a svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+.nt-pop a:hover { background: var(--surface-2); color: var(--text); }
+.nt-pop a.on { background: var(--accent-soft); color: var(--accent-strong); }
+.nt-pop a.on svg { color: var(--accent); }
+.nt-pop hr { width: 100%; height: 1px; margin: 4px 0; border: 0; background: var(--line); }
+.nt-pop .credits-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 10px; margin-bottom: 6px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.nt-pop .credits-bolt { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.nt-pop #credits:empty::before { content: "Claude credits"; color: var(--muted); font-size: 13px; }
+.nt-pop .credits-chip { display: block; height: auto; padding: 0; overflow: hidden; border: 0; background: none; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.nt-pop .credits-chip b { margin-right: 4px; color: var(--text); font-size: 15px; font-weight: 650; }
+.nt-pop .credits-bar { grid-column: 1 / -1; height: 4px; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
+.nt-pop .credits-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width 600ms var(--ease); }
+.nt-pop .credits-bar.low i { background: var(--warn); }
+.nt .menu-btn { display: none; color: var(--text); }
+main { max-width: 1480px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 40px) 80px; }
+
+@media (max-width: 860px) {
+  .nt { gap: 12px; }
+  .nt .engine { display: none; }
+  .nt .menu-btn { display: grid; }
+  .nt-links { position: absolute; top: 100%; left: 0; right: 0; z-index: 45; flex-direction: column; align-items: stretch; gap: 0; height: auto; padding: 8px clamp(16px, 3vw, 40px) 14px; border-bottom: 1px solid var(--line); background: var(--surface); box-shadow: 0 20px 40px -24px rgba(16, 16, 18, 0.35); opacity: 0; transform: translateY(-8px); pointer-events: none; transition: opacity var(--fast) var(--ease), transform var(--slow) var(--ease); }
+  body.nav-open .nt-links { opacity: 1; transform: none; pointer-events: auto; }
+  .nt-links a { height: 46px; font-size: 16px; }
+  .nt-links a.on { color: var(--accent-strong); }
+  .scrim { position: fixed; inset: 64px 0 0; z-index: 30; display: block; background: rgba(16, 16, 18, 0.25); opacity: 0; pointer-events: none; transition: opacity var(--slow) var(--ease); }
+  body.nav-open .scrim { opacity: 1; pointer-events: auto; }
+}
+@media (max-width: 480px) {
+  .nt-brand span { display: none; }
+}
+

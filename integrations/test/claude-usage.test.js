@@ -124,3 +124,38 @@ test("status, balance and page endpoints", async () => {
     integrations.stop();
   }
 });
+
+test("Higgsfield key check: missing, incomplete, rejected and working, without leaking the secret", async () => {
+  const check = async (env, reply) => {
+    let seen = null;
+    const integrations = createIntegrations({
+      dataDir: await tempDir(),
+      env,
+      fetch: async (url, init) => {
+        if (String(url).includes("higgsfield")) seen = init.headers.Authorization;
+        return String(url).includes("higgsfield") ? reply() : json({ data: [] });
+      },
+    });
+    const server = express().use("/api/integrations", integrations.router).listen(0);
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const body = await (await fetch(`http://localhost:${server.address().port}/api/integrations/status`)).json();
+      return { key: body.higgsfield.key, seen, raw: JSON.stringify(body) };
+    } finally {
+      server.close();
+      integrations.stop();
+    }
+  };
+
+  assert.deepEqual((await check({}, () => json({}))).key, { state: "missing" });
+  assert.deepEqual((await check({ HIGGSFIELD_API_KEY: "hf-id-1234" }, () => json({}))).key, { state: "incomplete" });
+
+  const keys = { HIGGSFIELD_API_KEY: "hf-id-1234", HIGGSFIELD_API_SECRET: "hf-secret-zzzz" };
+  const bad = await check(keys, () => json({ detail: "Invalid credentials" }, 401));
+  assert.deepEqual(bad.key, { state: "rejected", hint: "…1234" });
+  assert.equal(bad.seen, "Key hf-id-1234:hf-secret-zzzz");
+
+  const good = await check(keys, () => json({ detail: "Not found" }, 404));
+  assert.deepEqual(good.key, { state: "valid", hint: "…1234" });
+  assert.ok(!good.raw.includes("hf-secret-zzzz") && !good.raw.includes("hf-id-1234"), "keys never leave the server");
+});

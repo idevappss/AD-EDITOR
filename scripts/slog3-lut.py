@@ -5,8 +5,8 @@
 # The grades in Assets (2026-09-29):
 #   Bright:      --exp 0.8 --lift 0.2 --sat 1.1
 #   Warm:        --exp 0.8 --lift 0.2 --sat 1.14 --warm 0.045 --tint 0.02
-#   Warm + Blue: --exp 0.8 --lift 0.2 --sat 1.14 --warm 0.055 --tint 0.02 --cool 0.06 --teal 0.032 --skin 0.04
-#                (Template 1, the default grade for new ads)
+#   Warm + Blue: --exp 0.8 --lift 0.2 --warm 0.025 --gold 0.045 --sat 1.08 --tint 0.01 --cool 0.035 --teal 0.032
+#                (Template 1, the default grade for new ads; skin warm but not orange, at neutral saturation ~0.43)
 #   python3 scripts/slog3-lut.py "out.cube" --title "…" <flags>, then upload it in Assets as a LUT.
 import argparse
 ap = argparse.ArgumentParser()
@@ -16,6 +16,7 @@ ap.add_argument("--lift", type=float, default=0.0)    # extra lift at the lower 
 ap.add_argument("--sat", type=float, default=1.0)     # saturation around Rec.709 luma
 ap.add_argument("--warm", type=float, default=0.0)    # white balance: +R / -B in linear
 ap.add_argument("--tint", type=float, default=0.0)    # + = less green (magenta)
+ap.add_argument("--gold", type=float, default=0.0)    # golden white balance: warm without red (+G a little, -B), vs --warm's orange (+R -B)
 ap.add_argument("--cool", type=float, default=0.0)    # blue tint on near-neutral colours (walls, whites, greys), by output level
 ap.add_argument("--teal", type=float, default=0.0)    # teal tint in the shadows
 ap.add_argument("--skin", type=float, default=0.0)    # extra warmth/richness on skin hues only
@@ -30,7 +31,7 @@ def slog3_to_lin(x):
 
 # S-Gamut3.Cine -> Rec.709 linear (Sony's published matrix)
 M = [[1.6269474, -0.5401385, -0.0868088], [-0.1785155, 1.4179409, -0.2394254], [-0.0444233, -0.1959181, 1.2403414]]
-WB = [1 + a.warm, 1 - a.tint * 0.5, 1 - a.warm]
+WB = [1 + a.warm, (1 - a.tint * 0.5) * (1 + a.gold * 0.35), (1 - a.warm) * (1 - a.gold)]
 
 def tone(x):  # Narkowicz ACES filmic fit: soft toe, highlight shoulder
     x = max(0.0, x) * a.exp

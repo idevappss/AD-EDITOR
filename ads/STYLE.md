@@ -42,14 +42,23 @@ brackets); the planner must never work against them.
     (usually the last, complete one) plays. Never two CTAs. If the plan reuses the same footage twice, only the later use
     keeps it. Deliberate repetition inside one take ("You don't need to learn how to code. You don't need to learn any
     technicalities.") is rhetoric and stays. [retakeSpans, overlap trim]
-12. **The very end is the last CTA word:** "…seven day free trial" ends there, before "or decide to be left behind",
-    "Atlas is going to change your life", "see you inside" or a stray "Just"/"You". Only a further CTA ("…and learn
-    more") may follow. [endOnCta]
+12. **The ad ends when the CTA line is finished, never mid-CTA.** The whole instruction plays: "Click below and get your AI
+    employees started in your business today." stays whole (it was once cut after "click below", the creator:
+    "it didn't even let him finish"). Only what comes after the CTA and isn't part of it is cut: a sign-off ("see you
+    inside"), an "or…" alternative ("or decide to be left behind"), a new clause ("Atlas is going to change your
+    life"), or a stray "Just"/"You" from the next take. [endOnCta, TAIL_CUT_RE]
 13. **No half-words at any cut:** a cut never lands inside a word the plan left out (half a "You're" before a jump), and
     the ad never opens on a stray fragment of an earlier take followed by a jump. [clearDroppedWords, dropLeadIsland]
 14. **The X over ChatGPT/Claude only when the speaker knocks them** ("stop using ChatGPT", "it just gives you more
     work", "wasn't built for you"). Named in passing or compared ("large language models like ChatGPT and Claude")
     means the logos without an X, or no logo moment at all.
+16. **Refrains aren't retakes.** A phrase repeated in different lines ("…and it goes to do the work for you" / "…AI
+    employees doing the work for you" / "…do the work for you today") stays every time. Only the same whole line said
+    again is a retake. When a line is said twice back to back ("you will be left behind, you will be left behind
+    significantly fast"), exactly one saying stays, never none. [retakeSpans sameLine]
+17. **The creator's hand edits are lessons.** Whatever they put back, cut, add or change in the timeline afterwards is
+    compared with the builder's cut and becomes a lesson for every later ad (`ads/learn.js`). After any timeline change
+    the captions are rebuilt for the new cut, so no spoken word is left uncaptioned. [learnFromHandEdits, refreshCaptions]
 15. **The CTA design rotates** from ad to ad: the glowing button, search CTA, 7-day pass, end card or wordmark, never
     the same as the last two ads. The words stay the offer's. [CTA_STYLES]
 
@@ -71,7 +80,7 @@ brackets); the planner must never work against them.
 
 ## Motion language: the Atlas kit (the creator's call, 2026-09-28)
 
-Every graphic now follows the look of the creator's own Atlas motion ads (`ads/references/atlas-motion-kit.md`). It is
+Every graphic now follows the look of the creator's own Atlas motion ads (`motion/references/atlas-motion-kit.md`). It is
 minimal and calm: dark warm glass with a thin accent hairline, small mono kickers, two-tone lines (cream, then the
 accent), soft blur-ins and blur-outs, a slow 3D settle on cards, and no bounce, pop or overshoot. The kit's scenes are
 templates (task card, light-trail prompt, word swap, strike & replace, carousel, chat, org chart, end card…). Some play
@@ -150,7 +159,7 @@ Rule: **when the speaker names a brand or product, its logo appears huge, at the
   lines play and a **wide** shot for the sign-off. There is no end card, CTA button, arrow or text.
 - Hard out 0.3–0.5 s after the last word ("see you inside"), on a smile. No fade.
 
-## What our system can't do yet (ads/graphics.js)
+## What our system can't do yet (motion/render.js)
 - **Brand-logo pop-ups:** we have text/icon looks only. We need a `logo` look that takes a logo image asset (from
   `/api/resources/brand` or a per-ad upload), sets its position to behind / above-head, and offers the entrances "spin-zoom-blur", "fly-up-from-chest"
   and "blur-in", and the exit "colour-melt".

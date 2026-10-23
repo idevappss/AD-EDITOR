@@ -1,15 +1,15 @@
 // The edit plan contract ("edit-plan/1", documented in shared/EDIT_PLAN.md). It's the internal plan from
 // timeline.buildPlan() with every field unchanged, plus resolved additions (motion samples, effect cues, grade
 // params, text styles, audio automation, paths) so a renderer never has to re-decide anything.
-// HBA Content Backend renders it with HyperFrames; render.js renders the same plan with ffmpeg. The motion and effect
+// Ads Editor renders it with HyperFrames; render.js renders the same plan with ffmpeg. The motion and effect
 // math here mirrors render.js; keep the two in step. Within edit-plan/1, changes are additive only.
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { SFX_DIR } from "../motion/index.js";
 import { LOOKS, TEXT_STYLES, TRANSITIONS, cssFilter, gradeChain, gradeParams } from "./looks.js";
 import { sourceSpan } from "./render.js";
 
 export const PLAN_VERSION = "edit-plan/1";
-export const SFX_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "sfx");
+export { SFX_DIR };
 
 const FPS = 30;
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -208,6 +208,10 @@ export function toEditPlan(plan, { edit, raw, analyzed, planVersion }) {
     effectCues: plan.shots.flatMap((s, i) => effectCues(s, i)),
     texts: plan.texts.map((t) => ({ ...t, xPx: Math.round(width / 2), yPx: Math.round(height * t.y), style: textStyle })),
     textStyleResolved: textStyle,
+    // Motion graphics and their sounds as motion clips (edits/graphics.js), drawn by motion/render.js
+    // injectAdLayers on the edit's timeline; every sound is in motion/sfx.
+    graphics: plan.graphics || [],
+    graphicSfx: plan.graphicSfx || [],
     captionStyle: {
       font: "Avenir Next Condensed Heavy", weight: 400, sizePx: Math.round((88 * width) / 1080), color: "#FFFFFF", activeColor: hex(plan.accent),
       outlinePx: Math.round((6 * width) / 1080), outlineColor: "#000000", shadowPx: Math.round((3 * width) / 1080), uppercase: true,

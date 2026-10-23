@@ -1,5 +1,5 @@
 // Voice effects: the speaker's voice briefly goes underwater, muffled or through a phone speaker on one line, as
-// punctuation (ads/references/retention-transitions.md §2). Each effect is a filtered copy of the project's whole
+// punctuation (motion/references/retention-transitions.md §2). Each effect is a filtered copy of the project's whole
 // working audio, made once, so it shares the source timeline: over a voicefx clip, the voice <audio> pieces play
 // from that copy instead (same media offsets), with hard cuts in and out on the edit.
 

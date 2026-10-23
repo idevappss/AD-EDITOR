@@ -1,20 +1,29 @@
 // The hook the editor calls on every preview and render (editor/index.js preview, editor/director/render.js):
-// motion graphics and sound effects from the document, plus the ad's grade and the brand accent. Any document
+// motion graphics and sound effects from the document (drawn by motion/render.js), plus the ad's grade and the brand accent. Any document
 // without graphic or sfx tracks, and any clip that isn't an ad, comes back untouched.
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ROOT } from "../lib/tools.js";
-import { graphicClips, injectAdLayers, sfxClips } from "./graphics.js";
+import { listLuts } from "../lib/luts.js";
+import { graphicClips, injectAdLayers, sfxClips, sfxFile } from "../motion/index.js";
 import { DATA_DIR, adFor } from "./store.js";
 import { fxFile, splitVoice } from "./voicefx.js";
 
 export const LOGOS_DIR = path.join(DATA_DIR, "logos");
+export const PREVIEWS_DIR = path.join(DATA_DIR, "previews");
 
-export const SFX_DIR = path.join(ROOT, "edits", "sfx");
-const OWN_SFX_DIR = path.join(ROOT, "ads", "sfx");
-/** A sound effect's file: the Ads Editor's own (ads/sfx, e.g. the crash) first, then the shared library. */
-export const sfxFile = (name) => (existsSync(path.join(OWN_SFX_DIR, `${name}.mp3`)) ? path.join(OWN_SFX_DIR, `${name}.mp3`) : path.join(SFX_DIR, `${name}.mp3`));
+/**
+ * The LUT-graded preview copy of an ad's footage for one LUT: { file, lut }, or null when there's no such LUT.
+ * Named per version of the .cube, so a replaced LUT gets a new copy and a new URL (no stale browser cache).
+ */
+export async function gradedPreviewName(adId, lutId) {
+  const lut = (await listLuts()).find((l) => l.id === lutId);
+  if (!lut) return null;
+  const version = Math.round((await fs.stat(lut.file)).mtimeMs).toString(36);
+  return { file: `${adId}-${lutId}-${version}.mp4`, lut };
+}
+
 const UPSTREAM = () => `http://localhost:${Number(process.env.PORT) || 5173}`;
 
 let accentCache = { at: 0, hex: null };
@@ -55,9 +64,13 @@ export async function applyAdLayers(html, doc, { projectId, preview = true, stag
     if (!l) return null;
     return preview ? `/api/ads/${ad.id}/logos/${encodeURIComponent(l.file)}` : stage(path.join(LOGOS_DIR, ad.id, l.file), `ads/logos/${l.file}`);
   };
-  // Preview only: play the LUT-graded copy of the footage, so the preview matches the render's colour.
-  if (preview && ad?.preview?.file && doc.design?.lut && doc.design.lut === ad.preview.lut) {
-    html = html.replace(new RegExp(`/files/${projectId}/[^"]+?\\.mp4`, "g"), `/api/ads/${ad.id}/graded.mp4`);
+  // Preview only: play the LUT-graded copy of the footage for the timeline's LUT, so the preview matches the render's
+  // colour. Its URL is unique to that LUT and .cube version, so switching grades never replays a cached copy.
+  if (preview && ad && doc.design?.lut && doc.design.lut !== "none") {
+    const graded = await gradedPreviewName(ad.id, doc.design.lut);
+    if (graded && existsSync(path.join(PREVIEWS_DIR, graded.file))) {
+      html = html.replace(new RegExp(`/files/${projectId}/[^"]+?\\.mp4`, "g"), `/api/ads/${ad.id}/graded/${graded.file}`);
+    }
   }
   const slides = new Map((await fs.readFile(path.join(DATA_DIR, "slides", "index.json"), "utf8").then((t) => JSON.parse(t), () => [])).map((x) => [x.id, x]));
   const slideSrc = (slideId) => {

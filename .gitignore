@@ -12,3 +12,7 @@ data/
 assets/
 compositions/
 models/
+
+# Third-party references and licensed packs: kept locally, never pushed (licences forbid redistribution)
+motion/references/reels/
+motion/sfx/lib-*.mp3

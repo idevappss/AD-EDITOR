@@ -1,5 +1,6 @@
 // Left side: the tool rail and the panel it opens. Media holds the AI director, the creator's uploads (slide
-// decks, phone screen recordings, B-roll) and the sound library; Text adds titles; the rest are still to come.
+// decks, phone screen recordings, B-roll) and the sound library; Text adds titles; Elements holds the motion kit's
+// graphics and Effects its sound effects; the rest are still to come.
 import { $, $$, I, api, esc, tc } from "./ui.js";
 
 const TOOLS = [
@@ -16,9 +17,7 @@ const TOOLS = [
 
 const SOON = {
   captions: ["Caption styles", "Hormozi, karaoke, boxed, word-by-word and more, applied to every caption at once."],
-  elements: ["Elements", "Logos, stickers, arrows and shapes you can place and animate on the canvas."],
   transitions: ["Transitions", "Fades, dissolves, whips and zooms, dropped straight onto an edit point."],
-  effects: ["Effects", "Zoom punches, shakes, blurs and light leaks for any clip."],
   filters: ["Filters", "Color looks and adjustments: exposure, contrast, warmth, fade and vignette."],
   brand: ["Brand kit", "Your fonts, colors, logo and intro card, one click away."],
 };
@@ -33,6 +32,7 @@ export function createAssets(rail, panel, store, ctx) {
   let sending = []; // [{ name, pct }]
   let openDeck = null;
   let pollTimer = 0;
+  let sfxPlayer = null;
   const want = readWant();
   const projectId = ctx.context.project.id;
 
@@ -55,7 +55,7 @@ export function createAssets(rail, panel, store, ctx) {
       <div class="dr-card ${busy ? "busy" : ""}">
         <div class="dr-top">${I.sparkle(16)}<b>AI director</b></div>
         <p class="dr-lede">${busy ? "Reading what you say and matching your slides and recordings…" : hasUploads ? "Places your slides and phone recordings where you talk about them, and lands the key lines as big captions behind you." : "Upload your slides or phone recordings below, or build big captions from what you say."}</p>
-        <div class="dr-chips">${toggle("slides", "Slides")}${toggle("screens", "Phone demos")}${toggle("emphasis", "Big captions")}</div>
+        <div class="dr-chips">${toggle("slides", "Slides")}${toggle("screens", "Phone demos")}${toggle("emphasis", "Big captions")}${toggle("graphics", "Motion graphics")}</div>
         <input class="in-input dr-note" data-director-note maxlength="300" placeholder="Anything to steer it? (optional)" value="${esc(ctx.directorNote || "")}" ${busy ? "disabled" : ""} />
         <button class="btn-primary dr-go" data-director ${busy ? "disabled" : ""}>${busy ? `<span class="spinner sm"></span><span>Building your edit</span>` : `${I.sparkle(15)}<span>Build my edit</span>`}</button>
         ${d.message ? `<p class="dr-msg ${d.state === "error" ? "err" : ""}">${esc(d.message)}</p>` : ""}
@@ -134,6 +134,27 @@ export function createAssets(rail, panel, store, ctx) {
           <button class="as-add" data-add-text="plain"><span class="as-add-sample">Add text</span><small>A plain line of text</small></button>
           <button class="as-add" data-add-emphasis><span class="as-add-sample emph">Big caption</span><small>Huge glowing words behind you · at the playhead</small></button>
           <p class="as-hint">Select a title on the canvas or the timeline to edit it in the panel on the right.</p>
+        </div>`;
+    } else if (tool === "elements") {
+      // The motion kit (motion/templates): every graphic, grouped by what it's for, added at the playhead with its sounds.
+      const kit = ctx.context.kit?.templates || [];
+      const groups = [["hook", "Hooks"], ["benefit", "Big lines"], ["product", "What it does"], ["proof", "Proof & activity"], ["data", "Numbers"], ["cta", "Calls to action"], ["transition", "Transitions"]];
+      panel.innerHTML = `
+        <div class="as-head"><h3>Motion graphics</h3></div>
+        <div class="as-body">
+          <p class="as-hint">${kit.length ? "Click one to drop it at the playhead, with its sounds. Edit the words in the panel on the right." : "The motion kit loads after the app restarts."}</p>
+          ${groups.map(([job, label]) => {
+            const list = kit.filter((t) => t.job === job).sort((a, b) => Number(b.kit) - Number(a.kit));
+            return list.length ? `<div class="as-kit-group">${label}</div>${list.map((t) => `<button class="as-kit" data-add-graphic="${t.id}"><b>${esc(t.name)}</b><small>${esc(t.use)}</small>${t.scene === "always" ? `<span class="as-kit-tag">Full-screen</span>` : ""}</button>`).join("")}` : "";
+          }).join("")}
+        </div>`;
+    } else if (tool === "effects") {
+      const sounds = Object.entries(ctx.context.kit?.sounds || {});
+      panel.innerHTML = `
+        <div class="as-head"><h3>Sound effects</h3></div>
+        <div class="as-body">
+          <p class="as-hint">Play to preview; Add drops it at the playhead on the Sound FX track.</p>
+          ${sounds.map(([id, label]) => `<div class="as-sfx"><span>${esc(label)}</span><button data-play-sfx="${id}">Play</button><button data-add-sfx="${id}">Add</button></div>`).join("")}
         </div>`;
     } else if (tool === "audio") {
       panel.innerHTML = `
@@ -270,6 +291,18 @@ export function createAssets(rail, panel, store, ctx) {
     const add = e.target.closest("[data-add-text]");
     if (add) return ctx.actions.addText(add.dataset.addText);
     if (e.target.closest("[data-add-emphasis]")) return ctx.actions.addEmphasis();
+    const graphic = e.target.closest("[data-add-graphic]");
+    if (graphic) return ctx.actions.addGraphic(graphic.dataset.addGraphic);
+    const addSfx = e.target.closest("[data-add-sfx]");
+    if (addSfx) return ctx.actions.addSfx(addSfx.dataset.addSfx);
+    const play = e.target.closest("[data-play-sfx]");
+    if (play) {
+      sfxPlayer?.pause();
+      sfxPlayer = new Audio(`/api/ads/sfx/${encodeURIComponent(play.dataset.playSfx)}.mp3`);
+      sfxPlayer.volume = 0.6;
+      sfxPlayer.play().catch(() => ctx.toast?.("Couldn't play that sound"));
+      return;
+    }
   });
   panel.addEventListener("input", (e) => {
     if (e.target.matches("[data-director-note]")) ctx.directorNote = e.target.value;
@@ -331,8 +364,8 @@ export function createAssets(rail, panel, store, ctx) {
 function readWant() {
   try {
     // Big captions by default; slides and phone demos only when the creator turns them on for an edit.
-    return { slides: false, screens: false, emphasis: true, ...JSON.parse(localStorage.getItem("editor.director.v2") || "{}") };
+    return { slides: false, screens: false, emphasis: true, graphics: true, ...JSON.parse(localStorage.getItem("editor.director.v2") || "{}") };
   } catch {
-    return { slides: false, screens: false, emphasis: true };
+    return { slides: false, screens: false, emphasis: true, graphics: true };
   }
 }

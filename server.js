@@ -102,6 +102,7 @@ import { router as memoryRouter } from "./memory/index.js";
 import thumbnails from "./thumbnails/index.js";
 import ads from "./ads/index.js";
 import clipping from "./clipping/index.js";
+import ire from "./ire/index.js";
 import {
   CAN_PUBLISH,
   PUBLISHERS,
@@ -126,7 +127,7 @@ process.on("unhandledRejection", (err) => console.error("Unhandled background er
 // Load .env from the app folder, whatever directory the server was launched from.
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const PORT = Number(process.env.PORT) || 5173;
+const PORT = Number(process.env.PORT) || 5200;
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(ROOT, "public")));
@@ -170,6 +171,9 @@ ads.start();
 // Clipping: a video's winning moment cut five ways, one per page (clipping/index.js).
 app.use("/api/clipping", clipping.router);
 clipping.start();
+// IRE, the Intentional Reels Editor: takes filmed for the Intentional reels questions (ire/index.js).
+app.use("/api/ire", ire.router);
+ire.start();
 // Dope edits planner (edits/, DOPE CLIPS session; shared/EDIT_PLAN.md). It only plans here: lib/dope.js +
 // lib/editplan.js preview and render its plans with HyperFrames.
 const editsPlanner = createEditsIntegration({ sounds: { addTrack }, render: false });
@@ -1597,6 +1601,6 @@ await editsPlanner.start(); // clears planning jobs interrupted by a restart
 startChannelWatch(importChannelVideo);
 
 app.listen(PORT, () => {
-  console.log(`\n  HBA Content Backend → http://localhost:${PORT}`);
+  console.log(`\n  ATLAS Ad Editor → http://localhost:${PORT}`);
   console.log(`  Clip analysis: ${hasClaudeKey() ? "Claude (claude-opus-5)" : "demo heuristic — add ANTHROPIC_API_KEY to .env for Claude"}\n`);
 });

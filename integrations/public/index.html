@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Integrations · HBA Content Backend</title>
+    <title>Integrations · ATLAS Ad Editor</title>
     <link rel="stylesheet" href="/styles.css" />
     <style>
       .wrap { max-width: 880px; margin: 0 auto; padding: 32px 24px 96px; }
@@ -53,7 +53,7 @@
   </head>
   <body>
     <div class="wrap">
-      <a class="back" href="/">← HBA Content Backend</a>
+      <a class="back" href="/">← ATLAS Ad Editor</a>
       <h1>Integrations</h1>
       <p class="lede">The services this app connects to. Keys live in <code>.env</code> in the app folder; restart the app after changing one.</p>
 
@@ -86,6 +86,15 @@
       </section>
 
       <section class="card">
+        <div class="card-head">
+          <h2>Higgsfield</h2>
+          <span class="pill" id="hf-pill">Checking key…</span>
+        </div>
+        <p class="meta" id="hf-text">AI video and image generation. Connected here for later; nothing in the app uses it yet.</p>
+        <p class="how" id="hf-how" hidden>To connect: in <a href="https://cloud.higgsfield.ai" target="_blank" rel="noopener">Higgsfield Cloud ↗</a>, create an API key. Add its key ID and secret to <code>.env</code> as <code>HIGGSFIELD_API_KEY=</code> and <code>HIGGSFIELD_API_SECRET=</code>, then restart the app.</p>
+      </section>
+
+      <section class="card">
         <div class="row-link">
           <div>
             <h2>Instagram</h2>
@@ -111,6 +120,22 @@
         unreachable: ["", (key) => `Key ${key.hint} · can't reach Anthropic`],
         unknown: ["", (key) => `Key ${key.hint} · couldn't check`],
       };
+
+      const HF_PILL = {
+        valid: ["ok", (key) => `Key ${key.hint} · working`],
+        rejected: ["bad", (key) => `Key ${key.hint} · rejected`],
+        missing: ["", () => "Not connected"],
+        incomplete: ["bad", () => "Key ID or secret missing in .env"],
+        unreachable: ["", (key) => `Key ${key.hint} · can't reach Higgsfield`],
+        unknown: ["", (key) => `Key ${key.hint} · couldn't check`],
+      };
+
+      function renderHiggsfield({ key }) {
+        const [tone, label] = HF_PILL[key.state] ?? HF_PILL.unknown;
+        $("hf-pill").className = `pill ${tone}`;
+        $("hf-pill").textContent = label(key);
+        $("hf-how").hidden = key.state === "valid";
+      }
 
       function table(columns, rows, emptyText) {
         if (!rows.length) {
@@ -180,7 +205,9 @@
         try {
           const res = await fetch("/api/integrations/status");
           if (!res.ok) throw new Error(res.statusText);
-          render((await res.json()).claude);
+          const status = await res.json();
+          render(status.claude);
+          if (status.higgsfield) renderHiggsfield(status.higgsfield);
         } catch {
           $("key-pill").className = "pill";
           $("key-pill").textContent = "Couldn't load status";

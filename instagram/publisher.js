@@ -1,4 +1,4 @@
-// Publishes one HBA Content Backend post to one Instagram account: container → upload → processing → publish.
+// Publishes one Ads Editor post to one Instagram account: container → upload → processing → publish.
 //
 // publish() is idempotent per (post.id, account.id). Each step is saved as it happens, so calling again —
 // an overlapping scheduler tick, or a retry after a restart — resumes the earlier attempt or returns its
@@ -30,7 +30,7 @@ export function publicVideoUrl(videoPath, base = process.env.PUBLIC_BASE_URL) {
   return `${String(base).replace(/\/+$/, "")}/files/${parts.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** The connected Instagram login behind a HBA Content Backend account: by igUserId, else by matching handle. */
+/** The connected Instagram login behind an Ads Editor account: by igUserId, else by matching handle. */
 export function findConnection(connections, account) {
   if (!account) return null;
   if (account.igUserId) return connections.find((c) => c.id === String(account.igUserId)) || null;

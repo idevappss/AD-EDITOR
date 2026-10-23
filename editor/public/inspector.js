@@ -119,30 +119,45 @@ export function createInspector(root, store, ctx) {
       ${timing(clip)}`;
   }
 
-  // Ads Editor clips (ads/graphics.js draws them in the preview and render).
-  const LOOKS = { headline: "Kinetic headline", stat: "Big number", list: "Checklist", "lower-third": "Name bar", callout: "Badge", cta: "Call to action", compare: "Before / after", icon: "Icon card", logo: "Logo", proof: "Testimonial", check: "Big check", slide: "Slide" };
-  const SOUNDS = { whoosh: "Whoosh", "whoosh-short": "Quick whoosh", "whoosh-cinematic": "Cinematic whoosh", pop: "Pop", riser: "Riser", "impact-bass-1": "Bass hit", "impact-bass-2": "Deep impact", "glitch-1": "Glitch", "glitch-2": "Glitch 2" };
-  const options = (map, value) => Object.entries(map).map(([k, label]) => `<option value="${k}" ${k === value ? "selected" : ""}>${label}</option>`).join("");
+  // Motion kit clips (motion/render.js draws them in the preview and render): every look and template and every
+  // sound come from the server (ctx.context.kit), so the pickers always match the kit.
+  // (Before a server restart the context has no kit yet: the old built-in lists stand in.)
+  const KIT = ctx.context.kit || {
+    looks: { headline: "Kinetic headline", stat: "Big number", list: "Checklist", "lower-third": "Name bar", callout: "Badge", cta: "Call to action", compare: "Before / after", icon: "Icon card", logo: "Logo", proof: "Testimonial", check: "Big check", slide: "Slide" },
+    templates: [],
+    sounds: { whoosh: "Whoosh", "whoosh-short": "Quick whoosh", "whoosh-cinematic": "Cinematic whoosh", pop: "Pop", riser: "Riser", "impact-bass-1": "Bass hit", "impact-bass-2": "Deep impact", "glitch-1": "Glitch", "glitch-2": "Glitch 2" },
+  };
+  const TPL = Object.fromEntries(KIT.templates.map((t) => [t.id, t]));
+  const CLASSIC = Object.fromEntries(Object.entries(KIT.looks).filter(([k]) => !TPL[k]));
+  const SOUNDS = KIT.sounds;
+  const options = (map, value) => Object.entries(map).map(([k, label]) => `<option value="${k}" ${k === value ? "selected" : ""}>${esc(label)}</option>`).join("");
+  const lookOptions = (value) => `<optgroup label="Atlas motion kit">${options(Object.fromEntries(KIT.templates.filter((t) => t.kit).map((t) => [t.id, t.name])), value)}</optgroup><optgroup label="More templates">${options(Object.fromEntries(KIT.templates.filter((t) => !t.kit).map((t) => [t.id, t.name])), value)}</optgroup><optgroup label="Classic">${options(CLASSIC, value)}</optgroup>`;
 
   function graphicPanel(clip) {
-    const list = clip.look === "list" || clip.look === "compare";
-    const hint = { proof: "Main = the member's line, second line = their name.", logo: "Main = optional wordmark under the logo. The logo image comes from the Ads Editor.", stat: "Starts with the number, e.g. $100k/mo. It counts up.", compare: "Main = left label, second line = right label, items = before / after.", "lower-third": "Main = name, second line = role.", cta: "Main = the button, second line = the reason above it." }[clip.look] || "2–6 words land best.";
+    const t = TPL[clip.look];
+    const list = clip.look === "list" || clip.look === "compare" || Boolean(t);
+    const hint = t ? `${t.fields} One word can be written *like this* for an italic serif accent.` : { proof: "Main = the member's line, second line = their name.", logo: "Main = optional wordmark under the logo. The logo image comes from the Ads Editor.", stat: "Starts with the number, e.g. $100k/mo. It counts up.", compare: "Main = left label, second line = right label, items = before / after.", "lower-third": "Main = name, second line = role.", cta: "Main = the button, second line = the reason above it." }[clip.look] || "2–6 words land best.";
+    const scene = t && t.scene !== "none";
+    const full = t && (t.scene === "always" || clip.fullscreen);
     return `
       <div class="in-title"><span class="in-kind k-graphic">${I.elements(14)}Motion graphic</span></div>
-      ${section("Look", `<div class="in-row2">${field("Type", `<select class="in-input in-select" data-gfx="look">${options(LOOKS, clip.look)}</select>`)}${field("Position", `<select class="in-input in-select" data-gfx="position">${options({ top: "Top", center: "Center", bottom: "Bottom" }, clip.position)}</select>`)}</div>`)}
+      ${t ? `<p class="in-note">${esc(t.use)}</p>` : ""}
+      ${section("Look", `<div class="in-row2">${field("Type", `<select class="in-input in-select" data-gfx="look">${lookOptions(clip.look)}</select>`)}${field("Position", `<select class="in-input in-select" data-gfx="position">${options({ top: "Top", center: "Center", bottom: "Bottom" }, clip.position)}</select>`)}</div>
+        ${scene ? `${t.scene === "optional" ? `<label class="in-check"><input type="checkbox" data-gfx-bool="fullscreen" ${clip.fullscreen ? "checked" : ""} /> Full-screen scene (cuts away from you)</label>` : `<p class="in-note">Always a full-screen scene.</p>`}
+        ${full ? `<div class="in-row2">${field("Ground", `<select class="in-input in-select" data-gfx="tone">${options({ dark: "Dark", accent: "Accent colour", paper: "Paper" }, clip.tone || "dark")}</select>`)}${field("Comes in", `<select class="in-input in-select" data-gfx="transition">${options({ fade: "Fade", slide: "Slide up", wipe: "Wipe", circle: "Circle reveal", glitch: "Glitch cut", dive: "Dive into screen", blur: "Blur crossfade" }, clip.transition || "fade")}</select>`)}</div>` : ""}` : ""}`)}
       ${section("Words", `
-        <div class="in-stack"><input class="in-input" data-gfx="text" maxlength="120" value="${esc(clip.text)}" placeholder="Main words" /></div>
-        <div class="in-stack"><input class="in-input" data-gfx="sub" maxlength="120" value="${esc(clip.sub)}" placeholder="Second line (optional)" /></div>
-        ${["headline", "icon"].includes(clip.look) ? `<div class="in-stack"><input class="in-input" data-gfx="highlight" maxlength="60" value="${esc(clip.highlight)}" placeholder="Word to highlight" /></div>` : ""}
+        <div class="in-stack"><input class="in-input" data-gfx="text" maxlength="140" value="${esc(clip.text)}" placeholder="Main words" /></div>
+        <div class="in-stack"><input class="in-input" data-gfx="sub" maxlength="140" value="${esc(clip.sub)}" placeholder="Second line (optional)" /></div>
+        ${["headline", "icon"].includes(clip.look) || t ? `<div class="in-stack"><input class="in-input" data-gfx="highlight" maxlength="140" value="${esc(clip.highlight)}" placeholder="${t ? "Highlight / kicker (optional)" : "Word to highlight"}" /></div>` : ""}
         ${list ? `<div class="in-area"><textarea data-gfx="items" rows="4" placeholder="One item per line">${esc((clip.items || []).join("\n"))}</textarea></div>` : ""}
-        <p class="in-note">${hint}</p>`)}
+        <p class="in-note">${esc(hint)}</p>`)}
       ${timing(clip)}`;
   }
 
   function cameraPanel(clip) {
     return `
       <div class="in-title"><span class="in-kind k-camera">${I.zoomIn(14)}Camera move</span></div>
-      ${section("Move", `${field("Move", `<select class="in-input in-select" data-gfx="move">${options({ punch: "Punch in (hard jump tight)", push: "Push in (slow zoom)", pull: "Pull out (jump wide)", shake: "Shake (impact)", "zoom-blur": "Zoom blur punch", whip: "Whip pan (on a cut)", flash: "Flash", bw: "Black & white beat", rgb: "RGB split glitch" }, clip.move)}</select>`)}<p class="in-note">Holds for the clip's length, then the shot goes back to its normal rhythm.</p>`)}
+      ${section("Move", `${field("Move", `<select class="in-input in-select" data-gfx="move">${options({ punch: "Punch in (hard jump tight)", push: "Push in (slow zoom)", pull: "Pull out (jump wide)", shake: "Shake (impact)", "zoom-blur": "Zoom blur punch", whip: "Whip pan (on a cut)", flash: "Flash", bw: "Black & white beat", rgb: "RGB split glitch", blur: "Blur crossfade (big moment)" }, clip.move)}</select>`)}<p class="in-note">Holds for the clip's length, then the shot goes back to its normal rhythm.</p>`)}
       ${timing(clip)}`;
   }
 
@@ -235,6 +250,11 @@ export function createInspector(root, store, ctx) {
       store.commit(key === "sfx" ? "change sound" : key === "move" ? "change camera move" : key === "effect" ? "change voice effect" : "change graphic", (doc) => void (M.locate(doc, hit.clip.id).clip[key] = gfxSelect.value));
       return draw(true);
     }
+    const gfxBool = e.target.closest("input[data-gfx-bool]");
+    if (gfxBool && hit) {
+      store.commit("change graphic", (doc) => void (M.locate(doc, hit.clip.id).clip[gfxBool.dataset.gfxBool] = gfxBool.checked));
+      return draw(true);
+    }
     const sfxVol = e.target.closest("[data-sfxvol]");
     if (sfxVol && hit) store.commit("change volume", (doc) => void (M.locate(doc, hit.clip.id).clip.volume = r3(clamp(Number(sfxVol.value), 0, 1.5))));
     const caption = e.target.closest("[data-caption]");
@@ -276,7 +296,7 @@ export function createInspector(root, store, ctx) {
     const gfx = e.target.closest("input[data-gfx], textarea[data-gfx]");
     if (gfx && hit) {
       const key = gfx.dataset.gfx;
-      const value = key === "items" ? gfx.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 5) : gfx.value;
+      const value = key === "items" ? gfx.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 8) : gfx.value;
       clearTimeout(typing);
       typing = setTimeout(() => store.commit("edit graphic", (doc) => void (M.locate(doc, hit.clip.id).clip[key] = value)), 400);
     }

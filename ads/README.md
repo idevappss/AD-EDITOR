@@ -24,10 +24,35 @@ Owned by the **Ads Editor** session: `ads/` and `data/ads/`.
 
 ## Batch uploads
 
-Drop several videos at once. Each uploads in turn and becomes an ad; with **Edit them automatically** on, each goes into
-the edit queue with the batch brief (remembered in the browser), and with **Save the videos when done** on, each is
-rendered as soon as its edit finishes. Edits run one at a time (`enqueueEdit` / `pumpEdits` in `index.js`); waiting ads
+Drop several videos at once. Each uploads in turn and becomes an ad, goes into the edit queue with the batch brief
+(remembered in the browser), and is rendered as soon as its edit finishes. That's always on: there are no switches. Edits run one at a time (`enqueueEdit` / `pumpEdits` in `index.js`); waiting ads
 show "Queued: N ahead". A restart re-queues unfinished edits instead of failing them.
+
+## Basic: the talking-head editor (2026-10-21)
+
+The **Basic** editing style (`talking-head` in `styles.js`, `simple: true`) is deliberately simple: the cut, white
+captions in the middle of the frame, face tracking, and a pop-in on the lines that matter. Nothing else.
+
+- **The cut** is the usual one: Claude keeps only the clean takes (retakes, flubs, restarts, chatter and dead air
+  out), then the tightener, the listen-back and the silence check take out the rest.
+- **Planner** (`plan.js`): a simple ad isn't shown slides, templates, testimonials, a CTA design or a creative direction,
+  and its standing brief is just the cut and the hook. Its brief asks for a camera `punch` on each important line.
+- **Build** (`build.js`): whatever the plan says, a simple ad gets no graphics (no automatic number cards or CTA button
+  either), no sound effects, voice effects or cut hits, and only `punch` camera moves. Its design has `framing: "key"`.
+- **Framing** (`motion/render.js framingProgram`): `framing: "key"` turns off the wide/tight rhythm on every cut and
+  sentence. The shot holds wide (1.2×) and eases in to tight (1.38×, capped to keep the face in) for each punch, then
+  eases back out: animated, not a hard jump (`adFraming`). A punch holds until the sentence changes (`sentenceChange`
+  in `build.js`, up to 8 s), and an important line right after keeps it in instead of popping out and back.
+  The crop still follows the face and snaps to it at cuts.
+- **Captions** are the ads' plain white captions, always in the middle of the frame (50%). Only a caption that would
+  cover the face goes to the bottom, else the top (`captionPlacement`; `placeCaptionsOnly` places them even though a
+  Basic ad has no graphics or sounds).
+- **No LUT, no grade, on every ad (the creator, 2026-10-21):** the footage comes in already coloured, and the S-Log3
+  LUT on top of it turned skin pink. `NO_LUTS` in `index.js` makes `resolveLut` return none, `build.js` sets the grade
+  to none (Claude's pick is ignored), and the ad page has no Color grade picker or Ad settings grade templates. The
+  grade code is kept; flip `NO_LUTS` and restore the page controls to bring LUTs back.
+- **Defaults:** new Basic ads start with music and sound effects off (`optionsFrom` in `index.js`); the ad page's
+  switches still turn music back on. The page hides Brand logos and the idea chips for Basic ads.
 
 ## House rules (from the creator's feedback, 2026-09-23)
 
@@ -39,7 +64,9 @@ show "Queued: N ahead". A restart re-queues unfinished edits instead of failing 
 - **Grade:** two grade templates, each an Assets LUT, set on the Ads page (Template 1 / Template 2 and which one new
   ads use; `data/ads/settings.json`). Template 1 is "S-Log3 → Rec.709 Warm + Blue" (warm skin, cool whites) and the default; Template 2 is "Dr. OD
   Film Grade + Ads Boost". An ad can instead use a built-in grade or any other LUT. On a finished ad, changing the
-  grade applies on the spot (no re-edit): only `design.lut` changes, and the next save bakes it in. Renders bake the
+  grade applies on the spot (no re-edit): only `design.lut` changes, and the next save bakes it in. The pick shows at
+  once as a still of the current frame in that LUT; the graded preview video is built before the timeline switches,
+  so the player never drops to the flat log footage, and only the last of several quick picks is applied. Renders bake the
   LUT in, and the preview plays a LUT-graded copy (`data/ads/previews/`, one per ad, LUT and .cube version).
 - **Framing:** face-tracked horizontally (`clipFocus`, run during the edit). The shot jumps wide (1.2×) and tight
   (1.38×) at cuts and sentence breaks, anchored low (50% 88%), so the speaker sits high with little empty ceiling. It goes
@@ -62,35 +89,35 @@ show "Queued: N ahead". A restart re-queues unfinished edits instead of failing 
 - **Defaults are always on:** sound effects, music bed and captions, plus a standing brief (`STANDING_BRIEF` in `plan.js`).
 - **Rotation:** each edit picks a sound palette (`classic`/`crisp`/`airy` in `build.js` `PALETTES`), a stat look (glow/pill)
   and a CTA look (button/sonar), never repeating the last ad's; the planner is told which templates recent ads used.
-- **Template library:** `templates/`, 18 looks: bar-chart, line-chart, notification, typing-prompt, glass-card, network,
+- **Template library:** `motion/templates/`, 18 looks: bar-chart, line-chart, notification, typing-prompt, glass-card, network,
   sonar-cta, light-leak, glass-notif (liquid glass), app-card, service-stack, glow-pulse, profile-follow, percent-circle,
-  trend-line, loading-bar, countdown-ring, comment-pill. Shared bits in `templates/_parts.js`. The planner picks them as `kind: "template"`. Ideas behind them: `references/`.
+  trend-line, loading-bar, countdown-ring, comment-pill. Shared bits in `motion/templates/_parts.js`. The planner picks them as `kind: "template"`. Ideas behind them: `motion/references/`.
 - **Slides:** a shared library on the Ads Editor page (`data/ads/slides/`, `/api/ads/slides`). The planner sees each
   slide and can drop one in as `kind: "slide"` (a glass-framed card) when the words match it.
 - **Face in frame:** every video piece records the face band (`face`), and zooms are capped so the whole face stays in.
 - **Logos library:** `data/ads/logos/_library/`, so any ad can use a logo uploaded once.
 - **Cut hits** (Camera track, FastFX / CapCut-style): `whip` (on a cut), `zoom-blur`, `flash`, `shake`, `bw` (black-and-white
   beat), `rgb` (colour split). Each is 0.3–1.5 s with its own sound (`HIT_SFX` in `build.js`), drawn on `#video-punch` in
-  `graphics.js` (`adFraming`), and reset when it ends, so seeking is safe. The planner uses 2–4 per ad and rotates them.
+  `motion/render.js` (`adFraming`), and reset when it ends, so seeking is safe. The planner uses 2–4 per ad and rotates them.
 - **Voice FX** (`voicefx` track, `voicefx.js`): `underwater`, `muffle` or `phone` on one line. Each is a filtered copy of
   the project's whole audio (`data/ads/voicefx/<project>-<effect>.m4a`, made during the edit), and the voice pieces swap
   to it over the clip with the same source offsets. Underwater also gets a boom and a punch-in. Chains come from
-  `references/retention-transitions.md`.
+  `motion/references/retention-transitions.md`.
 - **Delete:** the trash button on each ad removes the ad, its video, renders and backups, and shows the space freed.
 
 ## The Atlas motion kit (2026-09-28)
 
-The creator's favourite look, studied from their own Atlas motion ads (`references/atlas-motion-kit.md`, which the planner
+The creator's favourite look, studied from their own Atlas motion ads (`motion/references/atlas-motion-kit.md`, which the planner
 reads with `STYLE.md` on every edit). Minimal and calm: dark warm glass with an accent hairline, mono kickers, two-tone
 lines (cream, then the accent), soft blur-ins and blur-outs, a slow 3D settle, and no bounce.
 
-- **28 kit templates** (`templates/`, listed first in `KIT` in `templates/index.js`): trail-prompt, task-card,
+- **28 kit templates** (`motion/templates/`, listed first in `KIT` in `motion/templates/index.js`): trail-prompt, task-card,
   approval-pill, task-board, schedule-clock, word-swap, strike-swap, notif-stack, card-carousel, stat-rows, logo-rings,
   chat-thread, org-chart, agent-grid, statement, end-card; plus, from the creator's Remotion source and the Jeremy AI demo,
   orbit-network, agent-log, approval-card, phone-report, chat-app, chain-stack, wordmark-type, status-flood, app-window,
   skill-cards, tool-map and voice-ring.
 - **Brand values** come from the creator's Remotion theme: the palette, Plus Jakarta Sans, Inter and JetBrains Mono (`assets/fonts/`),
-  the glass recipe, glow text, the ATLAS mark (the fallback logo) and the `atlas-*` sounds (`ads/sfx/`).
+  the glass recipe, glow text, the ATLAS mark (the fallback logo) and the `atlas-*` sounds (`motion/sfx/`).
 - **Scene grounds and transitions:** `tone` is dark (radial ink, grain, rising embers), accent (flat coral) or paper (cream,
   white cards). `transition` is fade, slide, wipe, circle or glitch, and rotates when it isn't set. Colours are CSS variables
   (`--tx`, `--tx2`, `--surface`, `--ink`…), so every template works on all three grounds.
@@ -104,7 +131,7 @@ lines (cream, then the accent), soft blur-ins and blur-outs, a slow 3D settle, a
 - **Mix:** the ad music bed is `AD_MUSIC_LEVEL` 0.112, and sound effects are scaled by `AD_SFX_GAIN` 0.7 (build.js).
 - **Banned in ads (the creator, 2026-09-28):** the glitch sounds and the underwater voice effect (`BANNED_SFX` and
   `BANNED_VOICEFX` in `build.js`). Both still exist for the rest of the app.
-- **Shared kit** (`templates/_parts.js`): `KIT_CSS` (`.mk-card`, `.mk-kick`, `.mk-h` with `.ac`, status dots, the scene
+- **Shared kit** (`motion/templates/_parts.js`): `KIT_CSS` (`.mk-card`, `.mk-kick`, `.mk-h` with `.ac`, status dots, the scene
   ground) is added to every composition with graphics. `KIT_JS` provides `blurIn`, `blurOut`, `settle3d`, `typeOn`, `blink` and `hide`.
   `hide` keeps an element invisible from the graphic's start until its own entrance (`CUR_T0`), so seeking is deterministic.
 - **Full-screen scenes:** a template with `scene: "optional"` plays as a cutaway when the clip has `fullscreen: true`,
@@ -126,22 +153,20 @@ lines (cream, then the accent), soft blur-ins and blur-outs, a slow 3D settle, a
 | `index.js` | `/api/ads` router, the edit job, save/download |
 | `plan.js` | Claude planner (structured output) and the no-key fallback |
 | `build.js` | Plan → editor document; writes `data/editor/<project>/ad.json` |
-| `graphics.js` | Looks, icons, sound effects and grades, and `injectAdLayers()`: HTML/CSS/GSAP + `<audio>` into a composition |
+| `../motion/` | The motion graphics library all editors share (moved out of ads/ 2026-10-01): templates, the renderer `injectAdLayers()`, sound effects and their rules. See motion/README.md |
 | `layers.js` | `applyAdLayers()`: the hook the editor calls on preview and render (brand accent, ad grade, sfx paths) |
 | `store.js` | `data/ads/db.json`, and `data/ads/settings.json` (the grade templates) |
 | `dev.js` | Dev server on 5198: this router with the code on disk, everything else proxied to 5173 (`node ads/dev.js`) |
 | `STYLE.md` | House style from the creator's example ad; read into every plan |
-| `references/atlas-motion-kit.md` | The Atlas motion kit: the creator's favourite motion language, read into every plan |
-| `templates/` | The template library (the kit first); `_parts.js` holds the shared kit CSS and motion helpers |
 | `public/ads.js`, `public/ads.css` | The tab. `mountAds(el)` |
 
 ## Tracks it adds to editor documents
 
-Two new track kinds, drawn by `ads/graphics.js`:
+Two new track kinds, drawn by `motion/render.js`:
 
 - `graphic` clips: `{ look, text, sub, highlight, items[], icon, position, fullscreen?, tone? }`, where look is one of headline, stat
   (counts up), list, lower-third, callout, cta, compare or icon, and position is top, center or bottom.
-- `sfx` clips: `{ sfx, volume, offset? }`, with sounds from `edits/sfx/`.
+- `sfx` clips: `{ sfx, volume, offset? }`, with sounds from `motion/sfx/`.
 
 The ad's colour grade (`clean`, `punchy`, `warm`, `cinematic`, `none`) lives on the ad record and replaces the
 composition's HyperFrames `data-color-grading`. Choosing one of the creator's LUTs sets `design.lut` instead, and renders bake it in.
@@ -174,7 +199,9 @@ composition's HyperFrames `data-color-grading`. Choosing one of the creator's LU
 | `GET /:id/download` | The saved MP4 |
 | `GET /:id/transcript` | The ad's transcript as `.txt`, or `?format=srt` |
 | `POST /:id/logos`, `PATCH`/`DELETE /:id/logos/:logoId` | Brand logos for the ad (multipart `logos`), and renaming or removing them |
-| `GET /:id/graded.mp4` | The LUT-graded preview copy |
+| `GET /:id/graded.mp4` | The LUT-graded preview copy (older links) |
+| `GET /:id/graded/:file` | One LUT's graded preview copy; previews point here, one URL per LUT and .cube version |
+| `GET /:id/look.jpg?lut=&t=` | A still of the footage in one LUT at source time `t`, shown the moment a grade is picked |
 | `DELETE /:id` | Delete the ad and its video (`?keepVideo=1` keeps the video) → `{ freed }` |
 | `GET/POST /slides`, `PATCH/DELETE /slides/:slideId` | The shared slides library (multipart `slides`) |
 | `GET /sfx/:name.mp3` | A sound effect, for previews |

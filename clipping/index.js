@@ -161,10 +161,25 @@ async function tick() {
   }
 }
 
+/** Versions whose render was cut off by a restart (lib/pipeline.js marks them) go back in the queue on boot. */
+async function resumeInterrupted() {
+  for (const project of await listProjects()) {
+    if (!project.clipping?.momentId) continue;
+    for (const clip of project.clips || []) {
+      if (clip.variantOf === project.clipping.momentId && clip.render?.status === "error" && /interrupted/i.test(clip.render.error || "")) {
+        console.log(`[clipping ${project.id}/${clip.id}] resuming render interrupted by a restart`);
+        renderVersion(project, clip.id);
+      }
+    }
+  }
+}
+
 export function start() {
   if (timer) return;
   timer = setInterval(tick, 5000);
   setTimeout(tick, 1500);
+  // After server.js's startup pass has flagged the cut-off renders.
+  setTimeout(() => resumeInterrupted().catch((err) => console.error("[clipping]", err.message)), 8000);
 }
 
 export function stop() {

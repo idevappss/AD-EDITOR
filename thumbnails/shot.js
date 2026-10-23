@@ -58,7 +58,7 @@ export async function closeBrowser() {
 
 /**
  * Render `html` to `outFile` (.jpg or .png) at 1280×720.
- * Returns { file, width, height, size }.
+ * Returns { file, width, height, size, lines } — lines is how many the headline wrapped to, when there is one.
  */
 export async function shoot(html, outFile, { scale = 1, quality = 92 } = {}) {
   const page = await (await getBrowser()).newPage();
@@ -69,10 +69,11 @@ export async function shoot(html, outFile, { scale = 1, quality = 92 } = {}) {
     await page.goto(pathToFileURL(temp).href, { waitUntil: "load", timeout: 30_000 });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForSelector("html[data-ready='1']", { timeout: 5000 }).catch(() => {});
+    const lines = await page.evaluate(() => Number(document.documentElement.dataset.lines) || null);
     const jpeg = /\.jpe?g$/i.test(outFile);
     await page.screenshot({ path: outFile, type: jpeg ? "jpeg" : "png", ...(jpeg ? { quality } : {}), captureBeyondViewport: false });
     const { size } = await fs.stat(outFile);
-    return { file: outFile, width: WIDTH * scale, height: HEIGHT * scale, size };
+    return { file: outFile, width: WIDTH * scale, height: HEIGHT * scale, size, lines };
   } finally {
     await page.close().catch(() => {});
     await fs.rm(temp, { force: true }).catch(() => {});

@@ -1,6 +1,7 @@
 // The edit director: looks at every source (contact sheets + moment stats + speech), the music's beat map
 // and the creator's style ideas, then writes a shot-by-shot plan. Claude when a key is set, a
-// beat-aware heuristic otherwise.
+// beat-aware heuristic otherwise. Claude also places a few motion graphics from the Ads Editor's kit
+// (edits/graphics.js); the heuristic director places none.
 import fs from "node:fs/promises";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -8,6 +9,7 @@ import { z } from "zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { titleGuidance } from "../titles/index.js";
 import { EFFECTS, LOOKS, SPEEDS, TEXT_STYLES, TRANSITIONS, ACCENTS, vocabulary } from "./looks.js";
+import { GRAPHIC_TEMPLATES, GRAPHICS_RULES, SCENE_TONES, SCENE_TRANSITIONS, cleanGraphics, graphicsCatalog } from "./graphics.js";
 
 const MODEL = "claude-opus-5";
 
@@ -53,6 +55,26 @@ const PlanSchema = z.object({
     }),
   ),
 });
+
+// Only asked for when the edit has motion graphics on. Template, tone and transition are plain strings checked by
+// cleanGraphics() (the structured-output helper turns enums into descriptions, so one stray id would otherwise fail
+// the whole plan's parse and throw the edit to the heuristic director).
+const GraphicsSchema = z.array(
+  z.object({
+    template: z.string().describe(`template id from the motion graphics catalog, one of: ${GRAPHIC_TEMPLATES.join(", ")}`),
+    at_shot: z.number().describe("index into your shots list where it comes in (0 = the first shot)"),
+    offset: z.number().describe("seconds after that shot starts on the edit's timeline"),
+    duration: z.number().describe("seconds on screen: about 3 words a second of its text plus the entrance; full-screen 3 s or less"),
+    text: z.string().describe("the main line, 1–6 words; one *word* in stars becomes the italic serif accent"),
+    sub: z.string().describe("secondary line per the template's fields, or empty string"),
+    highlight: z.string().describe("word(s) to color in the accent, or empty string"),
+    items: z.array(z.string()).describe("list items per the template's fields, or []"),
+    fullscreen: z.boolean().describe("cut away to a full-screen scene (only templates that can be full-screen); at most 1–2 per edit"),
+    tone: z.string().describe(`full-screen ground: ${SCENE_TONES.join(" | ")} (dark is the default)`),
+    transition: z.string().describe(`how a full-screen scene comes in: ${SCENE_TRANSITIONS.join(" | ")}`),
+  }),
+).describe("2–5 motion graphics from the kit, anchored on your shots");
+const PlanWithGraphicsSchema = PlanSchema.extend({ graphics: GraphicsSchema });
 
 const SYSTEM = `You are an elite short-form video editor known for "dope edits": music-synced montages for TikTok, Reels and Shorts with hard-hitting beat cuts, speed ramps, whip transitions, punchy zooms and a strong color grade. You pick only the best, most visually striking moments, you never leave dead air, and every cut lands on the music. Your edits feel intentional, not random: a hook in the first second, a build, a payoff on the drop, a clean ending.`;
 
@@ -122,7 +144,12 @@ Editing rules:
 ${multi ? "- Use every source at least once, and mix them so the edit tells one story.\n" : "- It's one long source: take only the best moments from across the whole thing, in whatever order makes the strongest edit.\n"}- Never use a moment with bright < 0.12 unless the brief wants dark. Don't repeat a moment unless it's a deliberate callback.
 - start/end are source seconds inside the chosen moment; you can use part of a moment or run slightly past it. For audio=source shots, start and end must wrap the whole spoken line.
 - focus_x: look at the contact sheet and put it where the subject is, so the ${options.aspect} crop keeps them in frame.
+${options.graphics ? `
+${GRAPHICS_RULES}
 
+Motion graphics catalog (template id, job, whether it can be full-screen, when to use it, what its fields mean):
+${graphicsCatalog()}
+` : ""}
 Vocabulary:
 ${JSON.stringify(vocab, null, 1)}`;
 
@@ -133,7 +160,7 @@ ${JSON.stringify(vocab, null, 1)}`;
     model: MODEL,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
-    output_config: { effort: "high", format: betaZodOutputFormat(PlanSchema) },
+    output_config: { effort: "high", format: betaZodOutputFormat(options.graphics ? PlanWithGraphicsSchema : PlanSchema) },
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     system,
@@ -146,6 +173,14 @@ ${JSON.stringify(vocab, null, 1)}`;
 
   const p = response.parsed_output;
   const bySource = Object.fromEntries(sources.map((s) => [s.letter, s]));
+  const shots = p.shots
+    .map((s, i) => ({ ...s, source: (String(s.source || "").trim() || String(s.moment || "").replace(/\d+$/, "")).toUpperCase(), focusX: s.focus_x, i }))
+    .filter((s) => bySource[s.source]);
+  // at_shot indexes the shot list as Claude wrote it: re-point it at the shots kept (a graphic on a dropped shot goes).
+  const kept = shots.map((s) => s.i);
+  const graphics = options.graphics
+    ? cleanGraphics(p.graphics).map((g) => ({ ...g, atShot: kept.indexOf(g.atShot) })).filter((g) => g.atShot >= 0)
+    : [];
   return {
     mode: "claude",
     concept: p.concept,
@@ -155,9 +190,8 @@ ${JSON.stringify(vocab, null, 1)}`;
     textStyle: p.text_style,
     accent: p.accent,
     musicStart: p.music_start,
-    shots: p.shots
-      .map((s) => ({ ...s, source: (String(s.source || "").trim() || String(s.moment || "").replace(/\d+$/, "")).toUpperCase(), focusX: s.focus_x }))
-      .filter((s) => bySource[s.source]),
+    shots: shots.map(({ i, ...s }) => s),
+    graphics,
   };
 }
 
@@ -314,6 +348,7 @@ function heuristicPlan({ sources, music, starts, options, recipe, seed }) {
     accent: recipe?.accent || ACCENTS[Math.floor(rand() * 4)],
     musicStart,
     shots,
+    graphics: [], // motion graphics need Claude to read the footage and the speech
   };
 }
 

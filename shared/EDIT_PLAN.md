@@ -37,7 +37,7 @@ Edit `status` moves through `queued → analyzing → directing → planned` (or
 - **Time**: seconds on the output timeline, starting at 0 and quantized to frames at `fps` (30). "Local" times are seconds from a shot's own `timeline.start`.
 - **Pixels**: canvas pixels (`width × height`).
 - **Colors**: `#RRGGBB` in resolved fields; `accent` (internal) is `RRGGBB` without `#`.
-- **Paths**: every `file` is absolute and readable by ffmpeg. Sources may live in `projects/<id>/`, `data/edits/edits/<id>/sources/`, or anywhere a host passed to `planEdit({ files })`. Music lives in `data/sounds/` or the edit folder. SFX are in `edits/sfx/`, served at `<mount>/sfx/<name>.mp3`.
+- **Paths**: every `file` is absolute and readable by ffmpeg. Sources may live in `projects/<id>/`, `data/edits/edits/<id>/sources/`, or anywhere a host passed to `planEdit({ files })`. Music lives in `data/sounds/` or the edit folder. SFX are in `motion/sfx/`, served at `<mount>/sfx/<name>.mp3`.
 
 ## Top level
 
@@ -89,7 +89,7 @@ Resolved additions:
 
 | Field | Meaning |
 |---|---|
-| `projectId` | HBA Content Backend project of the source, or `null` |
+| `projectId` | Ads Editor project of the source, or `null` |
 | `timeline` | `{ start: slotStart − pre, duration: length }` |
 | `sourceWindow` | `{ in, out }` source seconds the shot reads |
 | `speedSegments[]` | `parts` on the timeline: `{ timelineStart, duration, sourceStart, rate, reverse, freeze }` |
@@ -199,4 +199,4 @@ Animation timings are spelled out in `animationTiming`. Captions: one line of up
 | `audio.sfx[]` | `{ name, file, url, at, sourceStart, duration, gain, fadeOutSec }`: play `file` from `sourceStart` for `duration` starting at timeline `at` |
 | `audio.master` | `{ loudnessLufs: -14, truePeakDb: -1.5 }` |
 
-SFX files (Pixabay Content License, no attribution required; see `edits/sfx/CREDITS.md`): `whoosh`, `whoosh-short`, `whoosh-cinematic`, `impact-bass-1`, `impact-bass-2`, `glitch-1`, `glitch-2`, `riser`, `pop`.
+SFX files (Pixabay Content License, no attribution required; see `motion/sfx/CREDITS.md`): `whoosh`, `whoosh-short`, `whoosh-cinematic`, `impact-bass-1`, `impact-bass-2`, `glitch-1`, `glitch-2`, `riser`, `pop`.

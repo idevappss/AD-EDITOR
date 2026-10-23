@@ -156,7 +156,7 @@ Sources: Rich's 90-day proposal, Odell's notes back to him, the clipping standar
 - **Captions** must be in **Odell's voice** or **Abby's voice**, never generic: one caption prompt per person, built from their old captions and transcripts. Rich reviews every caption.
 - **Marketing team core values:** growth mindset · over-communication · over-delivery · speed · and underneath all four, **ownership**.
 - **Scoreboard:** CONTENT → ATTENTION → CONVERSATION → LEAD → SALE. Weekly win conditions: 1–3 conversions attributable to marketing, a 10K+ view video, a clipping page reaching 100 followers, and more volume with no drop in quality (with a performance bonus).
-- **The AI goal:** *"That plus the clip-selection prompt is what lets one person do a lot more. We are not trying to add a lot more team members."* This is what HBA Content Backend is for.
+- **The AI goal:** *"That plus the clip-selection prompt is what lets one person do a lot more. We are not trying to add a lot more team members."* This is what Ads Editor is for.
 - **The weekly rhythm** (from Rich's Content Creative Director calendar): **Monday** is the content shoot (7–8:30 AM), the Odell team call (film it, clips and photos) and **vlog day**. **Tuesday**: the client-success / weekly coaching call. **Wednesday**: the marketing team call, then thumbnails and titles (1–3 PM). **Thursday and Sunday**: workshop calls (set up, record, shoot, collect stats for Friday). **Friday**: oversee the clipping and HBA pages, write notes on how to improve, and send marketing statics to Gab. **Saturday**: "Me day", no vlog unless needed. **Sunday morning**: church. YouTube goes out Tue/Thu/Sun at 3 PM with marketing graphics and LinkTree updates.
 - **Public CTA** (from the keynote): the Thursday live virtual workshop, text **SHE ADJUSTS** to **(269) 359-3339**. Instagram: **@odellmiller25**, **@drabbymiller25**.
 
@@ -168,8 +168,8 @@ Miami (co-working HQ on the 9th floor of their building, Brickell/Design Distric
 - A **content department** that runs without Odell: Rich as Head of Content, a content manager and a clipper per personal brand, and a thumbnail designer. Captions and clip selection are done by AI prompts in each person's voice.
 - Odell steps out of sales (a sales team manager is hired) and eventually hands marketing to a director who's better than him. He stays in **leadership + top-of-funnel marketing**.
 - The Academy for the $0–10K pool, boardrooms replacing 1:1 calls, bigger in-person events, new funnels (100K Blueprint, new channels) and new niches (internal and integrative medicine).
-- **HBA 2.0**: revenue rooms plus **ATLAS AI** and its AI team (executive assistant, marketing assistant, content editor, bookkeeper). HBA Content Backend is the in-house version of the AI content editor.
-- A **media company**: clipping pages, AI editing (HBA Content Backend), a dialed-in content system.
+- **HBA 2.0**: revenue rooms plus **ATLAS AI** and its AI team (executive assistant, marketing assistant, content editor, bookkeeper). Ads Editor is the in-house version of the AI content editor.
+- A **media company**: clipping pages, AI editing (Ads Editor), a dialed-in content system.
 - **$10M in real estate by 2027**, generational wealth, and location freedom by plane.
 
 ---

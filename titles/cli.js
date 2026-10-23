@@ -7,12 +7,13 @@
 //   node titles/cli.js list
 //   node titles/cli.js guidance                        the prompt block Claude sees
 //   node titles/cli.js clips                           every clip with its ids and current titles
-//   node titles/cli.js clip <projectId> <clipId> [--generate] [--kind hook] [--count 10]
+//   node titles/cli.js video <projectId> [--kind youtube] [--intent tof|mof] [--count 8]
+//   node titles/cli.js clip <projectId> <clipId> [--generate] [--kind hook] [--count 10] [--intent tof|mof]
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import dotenv from "dotenv";
-import { ROOT, avoid, clipTranscript, generateTitles, like, loadLibrary, remove, titleGuidance } from "./index.js";
+import { ROOT, avoid, clipTranscript, generateTitles, like, loadLibrary, projectTranscript, remove, titleGuidance } from "./index.js";
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
@@ -23,6 +24,7 @@ const { values, positionals } = parseArgs({
     note: { type: "string" },
     count: { type: "string", default: "10" },
     generate: { type: "boolean", default: false },
+    intent: { type: "string" },
   },
 });
 
@@ -73,19 +75,31 @@ try {
       }
       break;
     }
+    case "video": {
+      const { project, text } = await projectTranscript(args[0]);
+      const kind = values.kind || "youtube";
+      console.log(`${project.name}  ·  ${Math.round((project.source?.duration || 0) / 60)} min  ·  ${text.split(" ").length} words`);
+      const titles = await generateTitles({ transcript: text, kind, count: Number(values.count) || 8, intent: values.intent });
+      console.log(`\n${kind} titles${values.intent ? ` (${values.intent})` : ""}:`);
+      titles.forEach((t, i) => console.log(`  ${i + 1}. ${t.title}  [${t.title.length}c]  (${t.angle}: ${t.why})`));
+      console.log("\nSOP: shortlist the best 3 and A/B test them.");
+      break;
+    }
     case "clip": {
       const [projectId, clipId] = args;
       const { clip, text } = await clipTranscript(projectId, clipId);
       console.log(`Hook:  ${clip.title}\nPost:  ${clip.postTitle}\n\nTranscript:\n${text}`);
       if (values.generate) {
-        const titles = await generateTitles({ transcript: text, kind: values.kind || "hook", count: Number(values.count) || 10 });
-        console.log(`\nNew ${values.kind || "hook"} titles:`);
-        titles.forEach((t, i) => console.log(`  ${i + 1}. ${t.title}  (${t.angle}: ${t.why})`));
+        const kind = values.kind || "hook";
+        const titles = await generateTitles({ transcript: text, kind, count: Number(values.count) || 10, intent: values.intent });
+        console.log(`\nNew ${kind} titles${values.intent ? ` (${values.intent})` : ""}:`);
+        // Character count matters for the 70-char YouTube cap.
+        titles.forEach((t, i) => console.log(`  ${i + 1}. ${t.title}  [${t.title.length}c]  (${t.angle}: ${t.why})`));
       }
       break;
     }
     default:
-      console.error("Commands: like, avoid, remove, import, list, guidance, clips, clip. See the top of titles/cli.js.");
+      console.error("Commands: like, avoid, remove, import, list, guidance, clips, clip, video. See the top of titles/cli.js.");
       process.exit(1);
   }
 } catch (err) {

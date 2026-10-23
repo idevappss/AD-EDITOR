@@ -1,5 +1,5 @@
 {
-  "name": "viral-clip-studio",
+  "name": "atlas-ad-editor",
   "version": "1.0.0",
   "description": "Turn long videos into viral captioned vertical clips with Whisper, Claude and HyperFrames",
   "main": "index.js",

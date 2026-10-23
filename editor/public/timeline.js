@@ -9,7 +9,7 @@ const PAD = 18; // space before 0s
 const ZOOM = { min: 4, max: 600 };
 const HEIGHT = { text: 36, caption: 36, video: 62, audio: 46, overlay: 48, emphasis: 36, graphic: 40, sfx: 32, camera: 28, voicefx: 28 };
 const KIND_ICON = { text: I.text, caption: I.captions, video: I.video, audio: I.audio, overlay: I.media, emphasis: I.sparkle, graphic: I.elements, sfx: I.effects, camera: I.zoomIn, voicefx: I.audio };
-// Ads Editor tracks (ads/graphics.js).
+// Ads Editor tracks (motion/render.js).
 const LOOK_LABEL = { headline: "Headline", stat: "Number", list: "Checklist", "lower-third": "Name bar", callout: "Badge", cta: "CTA", compare: "Before/after", icon: "Icon", logo: "Logo", proof: "Testimonial", check: "Big check", slide: "Slide" };
 const LAYOUT_LABEL = { full: "Full screen", split: "Side by side", pip: "Corner", card: "Card" };
 
@@ -167,7 +167,7 @@ export function createTimeline(root, store, ctx) {
       const dot = m === "done" ? "" : m === "queued" || m === "running" ? `<i class="tl-dot busy" title="Cutting out the speaker so the words sit behind them"></i>` : m === "error" ? `<i class="tl-dot err" title="Couldn't cut out the speaker here, so the words sit in front"></i>` : "";
       return `<span class="tl-label">${I.sparkle(12)}${esc(clip.text || "Big caption")}${dot}</span>${handles}`;
     }
-    if (clip.type === "graphic") return `<span class="tl-label"><b>${esc(LOOK_LABEL[clip.look] || "Graphic")}</b>${esc(clip.text || "")}</span>${handles}`;
+    if (clip.type === "graphic") return `<span class="tl-label"><b>${esc(ctx.context.kit?.looks?.[clip.look] || LOOK_LABEL[clip.look] || "Graphic")}</b>${esc(String(clip.text || "").replace(/\*/g, ""))}</span>${handles}`;
     if (clip.type === "camera") return `<span class="tl-label">${(clip.move === "pull" ? I.zoomOut : I.zoomIn)(11)}${{ punch: "Punch in", push: "Push in", pull: "Pull out", shake: "Shake", "zoom-blur": "Zoom blur", whip: "Whip", flash: "Flash", bw: "B&W", rgb: "RGB split" }[clip.move] || "Zoom"}</span>${handles}`;
     if (clip.type === "voicefx") return `<span class="tl-label">${I.audio(11)}${{ underwater: "Underwater", muffle: "Muffled", phone: "Phone" }[clip.effect] || "Voice FX"}</span>${handles}`;
     if (clip.type === "sfx") return `<span class="tl-label">${I.effects(11)}${esc(String(clip.sfx || "").replace(/-/g, " "))}</span>${handles}`;

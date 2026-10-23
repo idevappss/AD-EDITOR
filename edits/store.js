@@ -61,7 +61,7 @@ export async function deleteEdit(id) {
   await fs.rm(editDir(id), { recursive: true, force: true });
 }
 
-/** Where a source's media lives: uploaded into the edit, or referenced from a HBA Content Backend project. */
+/** Where a source's media lives: uploaded into the edit, or referenced from an Ads Editor project. */
 export function sourcePath(edit, source) {
   return path.isAbsolute(source.file) ? source.file : path.join(editDir(edit.id), source.file);
 }

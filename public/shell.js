@@ -1,52 +1,78 @@
-// App shell (Design session): search / ⌘K, mobile sidebar, credits bar and the account row.
-// Page content is app.js's job; this file only drives the frame around it.
+// App shell (Design session): the top nav (sliding underline, avatar menu, phone menu), search / ⌘K, the credits
+// bar and the account initials. Page content is app.js's job; this file only drives the frame around it.
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const getJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))));
 
-// ---------- mobile sidebar ----------
-const setNav = (open) => document.body.classList.toggle("nav-open", open);
+// ---------- phone menu: the nav links drop down under the bar ----------
+const setNav = (open) => {
+  document.body.classList.toggle("nav-open", open);
+  $("#menu-btn").setAttribute("aria-expanded", String(open));
+};
 $("#menu-btn").onclick = () => setNav(!document.body.classList.contains("nav-open"));
 $("#scrim").onclick = () => setNav(false);
 window.addEventListener("hashchange", () => setNav(false));
 
-// Library links point at scheduler tabs; mark the one that matches the current URL.
-const markLibrary = () => {
-  for (const a of document.querySelectorAll('.nav[aria-label="Library"] a')) {
-    a.classList.toggle("on", a.getAttribute("href") === location.hash);
+// ---------- the orange underline glides to the current page's link ----------
+const links = $("#nt-links");
+const ink = $("#nt-ink");
+function moveInk() {
+  const on = links.querySelector("a.on");
+  if (!on || getComputedStyle(links).position === "absolute") {
+    ink.style.opacity = "0";
+    return;
   }
+  ink.style.opacity = "1";
+  ink.style.width = `${on.offsetWidth}px`;
+  ink.style.transform = `translateX(${on.offsetLeft}px)`;
+}
+new MutationObserver(moveInk).observe(links, { subtree: true, attributes: true, attributeFilter: ["class"] });
+window.addEventListener("resize", moveInk);
+document.fonts?.ready.then(moveInk);
+
+// ---------- avatar menu: the other pages, Integrations and credits ----------
+const meBtn = $("#nt-me-btn");
+const pop = $("#nt-pop");
+const setMenu = (open) => {
+  pop.hidden = !open;
+  meBtn.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("menu-open", open);
 };
-window.addEventListener("hashchange", markLibrary);
-markLibrary();
+meBtn.onclick = (e) => {
+  e.stopPropagation();
+  setMenu(pop.hidden);
+};
+document.addEventListener("click", (e) => !pop.hidden && !e.target.closest(".nt-me") && setMenu(false));
+document.addEventListener("keydown", (e) => e.key === "Escape" && !pop.hidden && (setMenu(false), meBtn.focus()));
+pop.addEventListener("click", (e) => e.target.closest("a") && setMenu(false));
+// A page that lives in the menu marks the avatar as the current spot.
+const markMe = () => meBtn.classList.toggle("on", Boolean(pop.querySelector("a.on")));
+new MutationObserver(markMe).observe(pop, { subtree: true, attributes: true, attributeFilter: ["class"] });
 
 // ---------- search ----------
 const PAGES = [
-  ["Home", "#/", "Upload a video"],
-  ["Projects", "#/projects", "Every video"],
+  ["Ad studio", "#/ads", "Pick a style and create an ad"],
+  ["My ads", "#/my-ads", "Every ad you've made"],
+  ["Assets", "#/assets", "Brand kit: logos, LUTs, fonts"],
+  ["Sounds", "#/sounds", "Music and sound effects"],
   ["Study", "#/study", "References and taste"],
-  ["Titles", "#/titles", "Saved titles and ideas"],
-  ["Sounds", "#/sounds", "Music library"],
-  ["Thumbnails", "#/thumbnails", "Video thumbnails"],
-  ["Ads Editor", "#/ads", "Edit ads with graphics and sound effects"],
-  ["Assets", "#/assets", "Brand kit and resources"],
-  ["Scheduler", "#/scheduler", "Review clips"],
-  ["Calendar", "#/scheduler?tab=calendar", "Scheduled posts"],
-  ["Accounts", "#/scheduler?tab=accounts", "Posting accounts"],
-  ["Integrations", "/api/integrations/", "Keys and credits"],
+  ["Analytics", "#/analytics", "How posts and channels are doing"],
+  ["Memory", "#/memory", "Company memory"],
+  ["Integrations", "/api/integrations/", "Claude key and credits"],
 ];
 const input = $("#search-input");
+$("#search").addEventListener("click", () => input.focus());
 const box = $("#search-results");
 let index = { at: 0, items: [] };
 let active = 0;
 
 async function loadIndex() {
   if (Date.now() - index.at < 30_000) return index.items;
-  const [projects, library] = await Promise.all([getJson("/api/projects").catch(() => []), getJson("/api/library").catch(() => [])]);
+  const ads = (await getJson("/api/ads/").catch(() => ({ ads: [] }))).ads || [];
   index = {
     at: Date.now(),
     items: [
-      ...projects.map((p) => ({ kind: "Project", label: p.name, sub: p.clipCount ? `${p.clipCount} clips` : p.status, href: `#/p/${p.id}` })),
-      ...library.map((c) => ({ kind: "Clip", label: c.title || c.postTitle || "Clip", sub: c.projectName, href: `#/p/${c.projectId}` })),
+      ...ads.map((a) => ({ kind: "Ad", label: a.name, sub: a.status === "ready" ? (a.video ? "Saved" : "Ready to review") : a.status, href: `#/ads/${a.id}` })),
       ...PAGES.map(([label, href, sub]) => ({ kind: "Page", label, sub, href })),
     ],
   };
@@ -56,7 +82,7 @@ async function loadIndex() {
 async function renderResults() {
   const q = input.value.trim().toLowerCase();
   const items = await loadIndex();
-  const hits = (q ? items.filter((it) => `${it.label} ${it.sub}`.toLowerCase().includes(q)) : items.filter((it) => it.kind !== "Clip")).slice(0, 8);
+  const hits = (q ? items.filter((it) => `${it.label} ${it.sub}`.toLowerCase().includes(q)) : items).slice(0, 8);
   active = Math.min(active, Math.max(hits.length - 1, 0));
   box.innerHTML = hits.length
     ? hits
@@ -124,20 +150,15 @@ async function refreshCredits() {
 refreshCredits();
 setInterval(refreshCredits, 60_000);
 
-// ---------- account row ----------
-async function refreshAccount() {
-  const el = $("#sidebar-account");
-  const accounts = await getJson("/api/accounts").catch(() => []);
-  if (!accounts.length) {
-    el.hidden = false;
-    el.innerHTML = `<span class="sa-avatar">+</span><span class="sa-text"><b>Add an account</b><small>To schedule posts</small></span>`;
-    return;
-  }
-  const a = accounts[0];
-  const name = a.handle ? `@${a.handle.replace(/^@/, "").toLowerCase()}` : a.name;
-  const initials = (a.name || a.handle || "?").replace(/^@/, "").slice(0, 2).toUpperCase();
-  const platform = { instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube", x: "X", facebook: "Facebook", linkedin: "LinkedIn" }[a.platform] || "Account";
-  el.hidden = false;
-  el.innerHTML = `<span class="sa-avatar">${esc(initials)}</span><span class="sa-text"><b>${esc(name)}</b><small>${platform}${accounts.length > 1 ? ` · +${accounts.length - 1} more` : ""}</small></span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6" /></svg>`;
-}
-refreshAccount();
+// ---------- account initials (top bar) ----------
+getJson("/api/accounts")
+  .then((accounts) => {
+    const a = accounts[0];
+    const name = (a?.name || a?.handle || "").replace(/^@/, "");
+    if (!name) return;
+    const parts = name.split(/[\s._-]+/).filter(Boolean);
+    $("#top-avatar").textContent = (parts.length > 1 ? parts.slice(0, 2).map((w) => w[0]).join("") : name.slice(0, 2)).toUpperCase();
+    $("#top-avatar").title = `${a.name || a.handle} · Integrations`;
+  })
+  .catch(() => {});
+

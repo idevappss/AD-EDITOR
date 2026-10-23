@@ -6,9 +6,9 @@ export function createHeader(root, store, ctx) {
   const { project, clip } = ctx.context;
   root.innerHTML = `
     <div class="eh-left">
-      <a class="ibtn" href="#/p/${project.id}" title="Back to project">${I.back(18)}</a>
+      <a class="ibtn" href="#/p/${project.id}" title="Back">${I.back(18)}</a>
       <nav class="eh-crumbs" aria-label="Breadcrumb">
-        <a href="#/projects">Projects</a><i>${I.chevRight(13)}</i>
+        <a href="#/ads">My ads</a><i>${I.chevRight(13)}</i>
         <a href="#/p/${project.id}" class="eh-project">${esc(project.name)}</a><i>${I.chevRight(13)}</i>
         <span class="eh-clip" title="${esc(clip.title)}">${esc(clip.title || `Clip ${clip.rank}`)}</span>
       </nav>

@@ -15,6 +15,7 @@ export const ROOT = path.resolve(DIR, "..");
 const LIBRARY = path.join(DIR, "favorites.json");
 const STYLE = path.join(DIR, "STYLE.md");
 const PHRASES = path.join(DIR, "PHRASES.md");
+const SOP = path.join(DIR, "YOUTUBE_SOP.md");
 // Owned by other sessions: read only, and only the sections about how he speaks.
 const VOICE = path.join(ROOT, "shared", "ODELL_VOICE.md");
 
@@ -106,14 +107,15 @@ export function recordEdit({ before, after, kind = "hook", source = "edit" }) {
 /** Teaches Claude the creator's taste. Empty string until there's something to teach. */
 export async function titleGuidance() {
   const read = (f) => fs.readFile(f, "utf8").then((t) => t.replace(/<!--[\s\S]*?-->/g, "").trim(), () => "");
-  const [style, phrases, voiceDoc, lib] = await Promise.all([read(STYLE), read(PHRASES), read(VOICE), loadLibrary()]);
+  const [style, phrases, sop, voiceDoc, lib] = await Promise.all([read(STYLE), read(PHRASES), read(SOP), read(VOICE), loadLibrary()]);
   // Sections 3 (Voice) and 4 (Hooks traceable to his real story) are the title-relevant ones.
-  const voice = (voiceDoc.match(/^## (?:3|4)\. [\s\S]*?(?=^## (?!3\.|4\.)|$)/gmu) || []).join("\n").trim();
+  // (?![\s\S]) is end-of-file: with the m flag a bare $ would stop the match at the first line break.
+  const voice = (voiceDoc.match(/^## (?:3|4)\. [\s\S]*?(?=^## (?!3\.|4\.)|(?![\s\S]))/gmu) || []).join("\n").trim();
   const liked = lib.liked.slice(-MAX_LIKED);
   const loved = liked.filter((x) => !x.editedFrom);
   const rewrites = liked.filter((x) => x.editedFrom);
   const rejected = lib.avoid.slice(-MAX_AVOID);
-  if (!style && !phrases && !voice && !liked.length && !rejected.length) return "";
+  if (!style && !phrases && !sop && !voice && !liked.length && !rejected.length) return "";
 
   const line = (x) => `- ${x.title}${x.kind ? ` [${x.kind}]` : ""}${x.note ? ` — ${x.note}` : ""}`;
   const parts = [
@@ -122,6 +124,11 @@ The creator has a specific taste in titles. Match it in everything you write: on
   ];
   if (style) parts.push(`<style_guide>\n${style}\n</style_guide>`);
   if (phrases) parts.push(`<creator_language>\n${phrases}\n</creator_language>`);
+  if (sop) {
+    parts.push(
+      `<youtube_title_sop>\nThe creator\u2019s own SOP for YouTube titles. It governs [youtube] titles and full-video packaging; [hook] and [opener] keep their own shorter limits.\n${sop}\n</youtube_title_sop>`,
+    );
+  }
   if (voice) {
     parts.push(
       `<creator_voice source="shared/ODELL_VOICE.md">\nHow Dr. Odell speaks, and the hooks that come from his own life. These are HIS: if this video is someone else\u2019s footage, take the rhythm and structure only — never his story, his numbers or his lines.\n${voice}\n</creator_voice>`,
@@ -158,6 +165,16 @@ const TitlesSchema = z.object({
 
 const SYSTEM = `You write titles for short-form vertical clips (TikTok, Reels, Shorts). Your titles stop the scroll and sound like the creator, not a marketer, and they never promise something the clip doesn't deliver.`;
 
+/** The video's job, from the YouTube SOP: the wrong one pulls the wrong audience. */
+export const INTENTS = {
+  tof: "top of funnel, built to travel: broad outcome, wider curiosity gap",
+  mof: "middle of funnel, a nurturing sales asset: speak to the qualified buyer, name the niche and the mechanism, don't chase raw reach",
+};
+
+// Hard caps. YouTube truncates past 70 characters; burned-in hooks have to fit the screen.
+const CHAR_CAP = { post: 70, youtube: 70, idea: 70 };
+const WORD_CAP = { hook: 8, opener: 15 };
+
 const LIMITS = {
   hook: "max 8 words, since it's burned into the video over the speaker",
   opener: "max 15 words, said or shown in the first two seconds",
@@ -167,9 +184,10 @@ const LIMITS = {
 };
 
 /** Fresh titles for one clip, in the creator's voice, best first. */
-export async function generateTitles({ transcript, kind = "hook", count = 10, notes = "" }) {
+export async function generateTitles({ transcript, kind = "hook", count = 10, notes = "", intent = "" }) {
   if (!hasClaudeKey()) throw new Error("Add ANTHROPIC_API_KEY to .env to generate titles.");
   if (!KINDS.includes(kind)) throw new Error(`kind must be one of: ${KINDS.join(", ")}`);
+  if (intent && !INTENTS[intent]) throw new Error(`intent must be one of: ${Object.keys(INTENTS).join(", ")}`);
   if (!clean(transcript)) throw new Error("This clip has no transcript to title.");
 
   // Streamed: a long transcript plus adaptive thinking can run past the non-streaming ceiling, and a truncated
@@ -185,7 +203,7 @@ export async function generateTitles({ transcript, kind = "hook", count = 10, no
     messages: [
       {
         role: "user",
-        content: `Write ${count} ${kind} titles for this clip, best first. Each one ${LIMITS[kind]}. Vary the angle.${notes ? `\nCreator notes: ${notes}` : ""}
+        content: `Write ${count} ${kind} titles for this clip, best first. Each one ${LIMITS[kind]}. Vary the angle.${intent ? `\nThis video is ${INTENTS[intent]}.` : ""}${notes ? `\nCreator notes: ${notes}` : ""}
 
 <clip_transcript>
 ${transcript}
@@ -201,18 +219,37 @@ ${transcript}
   if (response.stop_reason === "max_tokens" || !response.parsed_output) {
     throw new Error("Claude's titles came back incomplete. Try again.");
   }
-  return response.parsed_output.titles.slice(0, count);
+  return withinLimits(response.parsed_output.titles, kind).slice(0, count);
+}
+
+/** Drop titles that break the format's hard limit, unless that would leave us with almost nothing. */
+function withinLimits(titles, kind) {
+  const chars = CHAR_CAP[kind];
+  const words = WORD_CAP[kind];
+  const ok = titles.filter((t) => !(chars && t.title.length > chars) && !(words && t.title.trim().split(/\s+/).length > words));
+  return ok.length >= Math.min(3, titles.length) ? ok : titles;
+}
+
+/** The whole video's transcript — what a YouTube title has to package. */
+export async function projectTranscript(projectId) {
+  const project = await loadProjectFile(projectId);
+  const text = (project.segments || []).map((s) => s.text).join(" ");
+  if (!text.trim()) throw new Error("This video has no transcript yet.");
+  return { project, text };
 }
 
 /** The words spoken in a clip, taken from its project's transcript. */
-export async function clipTranscript(projectId, clipId) {
+async function loadProjectFile(projectId) {
   if (!/^[a-z0-9]+-[a-f0-9]{6}$/.test(projectId)) throw new Error("Project not found");
-  let project;
   try {
-    project = JSON.parse(await fs.readFile(path.join(ROOT, "projects", projectId, "project.json"), "utf8"));
+    return JSON.parse(await fs.readFile(path.join(ROOT, "projects", projectId, "project.json"), "utf8"));
   } catch {
     throw new Error("Project not found");
   }
+}
+
+export async function clipTranscript(projectId, clipId) {
+  const project = await loadProjectFile(projectId);
   const clip = project.clips?.find((c) => c.id === clipId);
   if (!clip) throw new Error("Clip not found");
   // Clip edges are padded a little past speech, so count a sentence only when its middle is inside the clip.
@@ -243,8 +280,11 @@ router.post("/remove", handle(async (b) => ({ removed: await remove(b.title) }))
 router.post(
   "/generate",
   handle(async (b) => {
-    const transcript = b.transcript || (await clipTranscript(String(b.projectId), String(b.clipId))).text;
+    // No clipId means the whole video, which is what a YouTube title packages.
+    const transcript =
+      b.transcript ||
+      (b.clipId ? (await clipTranscript(String(b.projectId), String(b.clipId))).text : (await projectTranscript(String(b.projectId))).text);
     const count = Math.min(20, Math.max(1, Math.round(Number(b.count)) || 10));
-    return { titles: await generateTitles({ transcript, kind: b.kind || "hook", count, notes: b.notes }) };
+    return { titles: await generateTitles({ transcript, kind: b.kind || "hook", count, notes: b.notes, intent: b.intent }) };
   }),
 );

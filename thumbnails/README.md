@@ -1,39 +1,60 @@
 # Thumbnails
 
-The **Thumbnails** tab (`#/thumbnails`) gives every video a YouTube-ready **1280×720** thumbnail, made on its
-own while the video is still transcribing. Owned by the **THUMBNAILS** session: `thumbnails/` and `data/thumbnails/`.
-It only ever *reads* `projects/`.
+The **Thumbnails** tab (`#/thumbnails`) gives every video three YouTube-ready **1280×720** thumbnail variations,
+made on their own while the video is still transcribing, and built and checked by the creator's **YouTube
+Thumbnails SOP**. [SOP.md](SOP.md) maps each part of the SOP to the code. Owned by the **THUMBNAILS** session:
+`thumbnails/` and `data/thumbnails/`. It only ever *reads* `projects/`.
 
-How one gets made:
+How a set gets made:
 
-1. **Stills** — ten frames spread across the video (from `work.mp4` when the pipeline has made one), each scored on
-   face size and confidence (Apple Vision, the same tracker the crop uses), sharpness, contrast and exposure.
-2. **The pick and the words** — Claude looks at the best eight stills and picks the one that sells the video, then
-   writes a 2–6 word headline, the single word to hit with the accent colour, and an optional line underneath. It
-   writes in the creator's title taste when the `titles/` session is installed. A video that's still transcribing
-   gets judged on the pictures alone.
-3. **The picture** — headless Chrome paints the layout (Anton over the still, accent word boxed, gradient scrim,
-   optional brand logo and corner badge) and screenshots it at exactly 1280×720. The accent colour is the creator's
-   own, read from the Assets brand kit (`GET /api/resources/brand`) when there is one; otherwise the
-   `--burn-accent` token in `public/theme.css` (Design session) — the colour for burned-in artwork, which stays
-   punchy and stable instead of following the app's theme the way `--accent` does. The picture itself is always
-   white text on a dark scrim: it ends up in someone else's feed, not in the app.
+1. **Stills.** Sixteen frames spread across the video (from `work.mp4` when the pipeline has made one), 1920 wide.
+   Each is scored on face size and confidence (Apple Vision, the same tracker the crop uses), whether other
+   faces compete with the main one, sharpness, contrast and exposure. From your photos: up to 12 of the
+   creator's own photos, scored the same way.
+2. **The concept.** Claude looks at the best ten and builds three variations by the SOP. For each one it picks
+   the type (Moment, Story, Result, Transformation, Novelty), writes the curiosity gap, and picks the still, the
+   one or two scroll stoppers, 2–4 words (never more than 6), the accent word, an optional corner hit ("$1M",
+   "Day 90") and the tone. It's given the video's best YouTube title so the thumbnail opens a loop the title
+   doesn't close, plus the last ten thumbnails so it stays on-brand, and it writes in the creator's title taste.
+   With a text preset ("Day In A Life") every variation carries those exact words.
+3. **The picture.** Headless Chrome paints each one: the still pushed in so the face sits on the third away from
+   the words, a tone grade (serious = cool, bold = punchy, bright = warm), a spotlight on the subject, Anton in at
+   most three lines with the accent word boxed, and the corner hit in a top corner. The accent colour is the
+   creator's own, from the Assets brand kit (`GET /api/resources/brand`) when there is one, otherwise the
+   `--burn-accent` token in `public/theme.css`.
+4. **The four tests.** `check.js` lays the three out at phone-feed and sidebar size in YouTube dark and light
+   mode, and Claude runs the 12-box Banger checklist on that sheet. Fixable failures (words, layout, corner hit)
+   are fixed, repainted and checked again once. The variation most likely to win the click leads. The others are
+   kept as variations B and C.
 
-The tab has two views. **Videos** is one card per project with its current thumbnail and its switches.
-**All thumbnails** is every thumbnail there has ever been, newest first — the current one for each video and the
-ones they replaced. Click a replaced one to see it big, save it, delete it, or **Use this one again**, which puts
-it back as that video's thumbnail and sends the one it displaced to the history (the last 80 are kept, with their
-stills).
+Photos go in three ways: the **Upload photos** button at the top, dropping them anywhere on the page (both
+open **From your photos** with them ready), or **Add your photo** in a thumbnail's editor (or dropping photos
+on the editor), which puts your photo straight onto that thumbnail.
 
-Everything is editable afterwards: click a thumbnail to change the words, the layout, the accent, the corner badge,
-or to pick a different still from the strip — each change repaints in a couple of seconds. **New words** starts over
-on the same video. ♥ / ✕ on the words feeds the title taste library.
+**Your style** trains it on thumbnails the creator loves (the SOP's swipe file). Upload pictures or paste YouTube
+links, with a note on what they like. `style.js` has Claude break each one down by the SOP (type, gap,
+stoppers, words, text style, face, composition, colours, extras) and distils them all into a style profile:
+a summary, do's, don'ts, favourite types, word count, headline colour and caps. The profile, the creator's notes
+and four of the references go into every build; the profile also sets the headline colour and case, and the
+checklist's on-brand box checks against it. Editing a note or removing a reference relearns the profile.
+
+The tab has four views. **Videos** is one card per project with its lead thumbnail, its type, its checklist
+score and its switches. **From your photos** takes photos (drag in or choose, HEIC included), an optional
+video to attach them to, the title, what the video is about, and the words (Claude's, a preset, or your own).
+**All thumbnails** is every thumbnail there has ever been: the leads, their variations, and the ones they
+replaced (the last 80 are kept).
+
+Everything is editable afterwards. Click a thumbnail to switch which variation leads, see the checklist box by
+box, change the words (or pick a text preset), the accent word, the corner hit, the layout, the tone, the accent
+colour, or pick a different still. Each change repaints in a couple of seconds, and **Run it again** re-checks.
+**New variations** starts over; with a text preset picked, all three use it. **Save words as preset** adds the
+headline to the preset list. ♥ / ✕ on the words feeds the title taste library.
 
 ## Turning it off
 
 | Where | What it does |
 |---|---|
-| **Make them automatically** (tab header) | Off means nothing is made on its own, for any video. Existing thumbnails stay, and **Make one** still works per video. |
+| **Make them automatically** (tab header) | Off means nothing is made on its own, for any video. Existing thumbnails stay, and **Make them** still works per video. |
 | **Auto** switch on a video's card | Off means *this* video never gets one — the rest still do. |
 
 Both are stored in `data/thumbnails/db.json` (`settings.auto` and `projects.<id>.auto`), so they survive restarts.
@@ -41,16 +62,20 @@ A video that already has a thumbnail is never redone on its own.
 
 | File | What it is |
 |---|---|
-| `index.js` | The library, the watcher that makes them automatically, and the `/api/thumbnails` router |
-| `frames.js` | Candidate stills: extraction and scoring (faces, sharpness, contrast, exposure) |
-| `headline.js` | Claude picks the still and writes the words; falls back to the best-scoring frame without a key |
-| `compose.js` | The 1280×720 page: layouts, scrims, brand accent and logo |
+| `index.js` | The library (sets of variations), the watcher that makes them automatically, photo uploads, and the `/api/thumbnails` router |
+| `sop.js` / `SOP.md` | The creator's thumbnail SOP: the five types, scroll stoppers, tones, the checklist, text presets, and the prompt block |
+| `frames.js` | Candidate stills from the video or the creator's photos: extraction and scoring (faces, rival faces, sharpness, contrast, exposure) |
+| `headline.js` | Claude builds three variations by the SOP; falls back to the best-scoring stills without a key |
+| `style.js` | Your style: the swipe file (`data/thumbnails/style.json`, pictures in `data/thumbnails/style/`), the per-thumbnail breakdowns, the style profile, and the `/api/thumbnails/style` router |
+| `check.js` | The four tests and the Banger checklist on the painted set, with one round of fixes |
+| `compose.js` | The 1280×720 page: rule-of-thirds push-in, tone grades, spotlight, layouts, corner hit, brand accent and logo |
 | `shot.js` | Headless Chrome screenshot (one warm browser, closed after a minute idle) |
 | `public/thumbnails.js` | The tab. `mountThumbnails(el)` renders into `#app` and returns a cleanup function |
 | `public/thumbnails.css` | Styles. Theme tokens only |
 | `dev.js` | Dev server on port 5196. Patches the nav link and route in, and proxies the rest to :5173 |
-| `data/thumbnails/db.json` | Settings, per-video switches, the current thumbnails and the replaced ones. Re-read whenever another process writes it, so the app and `dev.js` can both be up |
-| `data/thumbnails/files/<id>/` | The candidate stills and the finished `thumb.jpg` |
+| `data/thumbnails/db.json` | Settings (with saved text presets), per-video switches, the lead thumbnails, and the variations and replaced ones. Re-read whenever another process writes it, so the app and `dev.js` can both be up |
+| `data/thumbnails/files/<id>/` | One variation's finished `thumb.jpg` (older items keep their stills here too) |
+| `data/thumbnails/files/<stills>/` | A set's candidate stills or uploaded photos, shared by its variations, plus the test sheet `checks.png` |
 
 ## Wiring (already applied, 2026-09-22)
 
@@ -90,22 +115,25 @@ Nothing else is needed: the watcher finds new videos by itself, so the import pi
 
 | Method & path | Returns |
 |---|---|
-| `GET /` | `{ settings, layouts, claude, videos, history }`. One entry per project, newest first, each with its thumbnail or `null`, plus every replaced thumbnail. |
-| `PATCH /settings` | `{ auto, sub, logo, layout, accent }` — `auto: false` stops every automatic thumbnail. |
+| `GET /` | `{ settings, layouts, presets, sop, claude, working, videos, photos, history }`. One entry per project, newest first, each with its lead thumbnail or `null`; the photo sets not tied to a video; every variation and replaced thumbnail. Each item carries `type`, `gap`, `stoppers`, `tone`, `checks`, `passed` and its set's `variants`. |
+| `PATCH /settings` | `{ auto, sub, logo, layout, accent, presets }` — `auto: false` stops every automatic thumbnail; `presets` is the creator's own text presets. |
 | `POST /videos/:id/auto` | `{ auto }` for one video. |
-| `POST /videos/:id/generate` | Makes one now, whatever the switches say. Replaces that video's thumbnail. |
-| `PATCH /items/:id` | `{ headline, word, sub, badge, layout, accent, logo, frame }` then repaints. |
-| `POST /items/:id/again` | Fresh still and fresh words for the same video. |
-| `POST /items/:id/restore` | Puts a replaced thumbnail back as the video's current one. |
+| `POST /videos/:id/generate` | `{ preset? }` Makes three variations now, whatever the switches say. Replaces that video's thumbnail. |
+| `POST /photos` | multipart `photos` (up to 12), `videoId?`, `title?`, `about?`, `preset?`. Three variations from the creator's photos. |
+| `PATCH /items/:id` | `{ headline, word, sub, badge, layout, tone, accent, logo, frame }` then repaints. |
+| `POST /items/:id/photos` | multipart `photos`. Adds the creator's own photos to that thumbnail's stills and repaints it with the best one. |
+| `POST /items/:id/check` | Runs the four tests and the checklist again on the item's set. Reports only. |
+| `POST /items/:id/again` | `{ preset? }` Three fresh variations for the same video or photos. |
+| `POST /items/:id/restore` | Makes a variation (or a replaced thumbnail) the one the video leads with. |
 | `POST /items/:id/rate` | `{ liked }` — ♥ / ✕, which also teaches `titles/`. |
-| `DELETE /items/:id` | Forgets the thumbnail and its stills. Works on a replaced one too. |
+| `DELETE /items/:id` | Forgets the thumbnail (and its stills once no variation uses them). Deleting a lead hands the lead to the next variation. |
 | `GET /items/:id/file` | The 1280×720 JPEG. `?download` saves it under the video's name. |
 | `GET /items/:id/frames/:file` | One candidate still. |
 | `GET /for?projectId=` | `{ thumbnail }` — for other sessions. |
 
 ## For other sessions
 
-Read `GET /api/thumbnails/for?projectId=<id>` for a video's thumbnail instead of pulling your own poster frame.
+Read `GET /api/thumbnails/for?projectId=<id>` for the thumbnail a video leads with instead of pulling your own poster frame.
 The record carries `url`, `headline`, `word`, `sub`, `frame.at` (the second it was taken from, useful as a Reel
 cover) and the candidate stills. It's read-only from outside; thumbnails are made here.
 

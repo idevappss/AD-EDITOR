@@ -1,20 +1,29 @@
-// Dev server for the Ads Editor tab (port 5198). Serves HBA Content Backend's page from disk, mounts this router
-// with the code on disk, and proxies everything else to the running HBA Content Backend server on 5173, which it
-// never restarts. It doesn't resume queued edits (only the real server's start() does).
+// Dev server for the Ads Editor tab (port 5198). Serves Ads Editor's page from disk, mounts this router
+// with the code on disk, and proxies everything else to the running Ads Editor server on 5173, which it
+// never restarts. It doesn't resume queued edits (only the real server's start() does). The editor's previews are
+// served here too (GET only), so ad layers on disk (ads/layers.js: graphics, grade) show without a restart.
 //   node ads/dev.js   → http://localhost:5198/#/ads
+import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import dotenv from "dotenv";
 import express from "express";
-import { ROOT } from "../lib/tools.js";
+import { PROJECTS_DIR, ROOT } from "../lib/tools.js";
+import { createEditor } from "../editor/index.js";
 import { router } from "./index.js";
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 const PORT = Number(process.env.ADS_PORT) || 5198;
 const UPSTREAM = process.env.CLIP_STUDIO_URL || "http://localhost:5173";
 
+// Projects read fresh from disk (Ads Editor writes them as they change), as editor/dev.js does.
+const editor = createEditor({
+  loadProject: async (id) => JSON.parse(await fs.readFile(path.join(PROJECTS_DIR, id, "project.json"), "utf8").catch(() => "null")),
+}).router;
+
 const app = express();
 app.use("/api/ads", router);
+app.use("/api/editor", (req, res, next) => (req.method === "GET" ? editor(req, res, next) : next()));
 app.use(express.static(path.join(ROOT, "public"), { setHeaders: (res) => res.set("Cache-Control", "no-store") }));
 
 app.use(async (req, res) => {
@@ -39,7 +48,7 @@ app.use(async (req, res) => {
     if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
     else res.end();
   } catch (err) {
-    res.status(502).type("text").send(`HBA Content Backend isn't reachable at ${UPSTREAM}: ${err.message}`);
+    res.status(502).type("text").send(`Ads Editor isn't reachable at ${UPSTREAM}: ${err.message}`);
   }
 });
 

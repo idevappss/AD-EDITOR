@@ -6,6 +6,9 @@ Teaches Claude the creator's taste in titles and applies it to every clip. Owned
 |---|---|
 | `favorites.json` | `liked`: titles they love. `avoid`: titles they rejected. Hand-edited clip titles land in `liked` with `editedFrom`. |
 | `STYLE.md` | Style guide distilled from the favorites. Sent with every title request (HTML comments are stripped). |
+| `PHRASES.md` | His own frameworks and verified quotes, curated from the Assets library. |
+| `YOUTUBE_SOP.md` | The creator's YouTube Titles SOP: the 70-character cap, keyword rule, TOF/MOF intent and the proven 2026 formats. Governs `youtube` titles. |
+| `shared/ODELL_VOICE.md` | Read (not owned) for how he speaks and his real-story hooks. His story is used only on his own footage. |
 | `index.js` | Library, the `titleGuidance()` prompt block, `generateTitles()`, and the `/api/titles` router. |
 | `cli.js` | Manage favorites and title clips from the terminal (usage at the top of the file). |
 
@@ -50,6 +53,6 @@ api("/api/titles/avoid", { method: "POST", body: { title, kind } });
 | `POST /remove` | `{ title }` | `{ removed }` |
 | `POST /generate` | `{ projectId, clipId, kind?, count? }` or `{ transcript, kind?, count? }` | `{ titles: [{ title, angle, why }] }` |
 
-`kind` is `hook` (on-screen clip headline, max 8 words), `opener` (opening line for the first two seconds, max 15 words), `post` (post title), `youtube` (YouTube title) or `idea`. Generation needs `ANTHROPIC_API_KEY`.
+`intent` is `tof` (built to travel) or `mof` (nurturing sales asset), per the YouTube SOP. `kind` is `hook` (on-screen clip headline, max 8 words), `opener` (opening line for the first two seconds, max 15 words), `post` (post title), `youtube` (YouTube title) or `idea`. Generation needs `ANTHROPIC_API_KEY`.
 
 UI mapping: clip title inputs → `hook`, Fire hooks → `opener`, YouTube titles → `youtube`, Viral titles → `idea`.

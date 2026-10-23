@@ -187,7 +187,7 @@ export async function listTranscripts() {
   return [...db.items].sort((a, b) => (b.date || b.createdAt).localeCompare(a.date || a.createdAt));
 }
 
-/** Every video transcribed in HBA Content Backend itself, read straight from projects/ (never copied). */
+/** Every video transcribed in Ads Editor itself, read straight from projects/ (never copied). */
 async function projectTranscripts() {
   const out = [];
   for (const id of await fs.readdir(PROJECTS_DIR).catch(() => [])) {

@@ -8,9 +8,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { FFMPEG, ROOT, run } from "../lib/tools.js";
-import { GRADES, SFX } from "./graphics.js";
-import { templateCatalog } from "./templates/index.js";
-import { BANNED_SFX } from "./build.js";
+import { BANNED_SFX, CAMERA_MOVES, GRADES, KIT_REFERENCE, SFX, TRANSITIONS, templateCatalog } from "../motion/index.js";
+import { editStyleOf } from "./styles.js";
 
 /** The sounds the planner may use (never the banned ones). */
 const SOUNDS = Object.keys(SFX).filter((k) => !BANNED_SFX.has(k));
@@ -29,6 +28,7 @@ export const CTA_STYLES = {
   "search-cta": { name: "Search", brief: 'the search-cta template on the CTA line: the query types ("atlas 7 day free trial"), the result card drops, the cursor clicks the button. Perfect when the speaker says "search".' },
   "trial-pass": { name: "7-day pass", brief: 'the trial-pass template on the CTA line: seven day cells light up, then "7 days. / On us." and the button. Trial offer only (a call offer uses the end card instead).' },
   "end-card": { name: "End card", brief: 'the end-card template as a full-screen close on the CTA line, on the accent or dark tone.' },
+  "logo-sting": { name: "Logo sting", brief: 'the logo-sting template as the full-screen close on the CTA line: a dot circle-wipes into the accent field, the mark and wordmark resolve, the tagline and the CTA pill land and hold.' },
   "wordmark-type": { name: "Wordmark", brief: 'the wordmark-type template as the close: the wordmark types itself and the offer line lands under it.' },
 };
 export const offerCtaStyles = (offer) => Object.keys(CTA_STYLES).filter((k) => !(offer === "call" && k === "trial-pass"));
@@ -36,7 +36,7 @@ export const offerCtaStyles = (offer) => Object.keys(CTA_STYLES).filter((k) => !
 /**
  * Creative directions (the creator, 2026-09-28: "switch up the style… get creative, I'm giving you creative freedom").
  * Every new ad gets one, never the same as the last two ads', so no two ads in a row look alike. Each is built from
- * one of the creator's reference ads (ads/references/atlas-motion-kit.md).
+ * one of the creator's reference ads (motion/references/atlas-motion-kit.md).
  */
 export const DIRECTIONS = {
   "ink-ember": {
@@ -62,6 +62,18 @@ export const DIRECTIONS = {
   "quiet-luxury": {
     name: "Quiet Luxury",
     brief: "Minimal and confident: few graphics, all of them big. The speaker carries it with camera moves; 2 full-screen scenes at most (a statement and logo-rings or wordmark-type), plus the numbers. Lots of empty space, slow fades, no busy UI.",
+  },
+  "master-edit": {
+    name: "Master Edit",
+    brief: "The creator's master reference (motion/references/sound-study.md, 2026-10-23): a cinematic talking head that stays on the speaker most of the time with clean word-by-word captions. Introduce the speaker early with name-title. Every money figure is a number moment (it counts up white, with a small italic line under it). Mark the captions: reported speech as quote, the one or two phrases the ad turns on as caps, one twist as box. Cut away to at most two full-screen scenes on what the product changes: content-funnel for content that goes nowhere, mind-map for the plan or the steps, focus-count for doing less. Go into the biggest scene with the blur transition, or put one blur cut hit on the big turn. Punch in on the key lines; no flashes, glitches or shakes.",
+  },
+  "screen-dive": {
+    name: "Screen Dive",
+    brief: "The creator's reference reels (2026-10-22, motion/references/reel-study.md): show the system itself, shot like a screen. Dive (the dive transition) from the speaker into app-flythrough, the product as a dark app filling in with results, and into workflow-run, the automation firing node by node with a hot pulse along the wires. On the speaker, teach with frame-markup (a highlighter swipe, a title pill, a dashed eyeline) on the exact words. 2 full-screen scenes at most; everything else stays on the speaker with clean centred captions.",
+  },
+  "director-punch": {
+    name: "Director Punch",
+    brief: "The motion-graphics-director showreel feel (2026-09-30): nearly nothing, then everything. Open a hard claim with dot-open (one dot floods the frame, the words slam in), hammer the key word with word-wallpaper, prove it with numbers that move (grid-fill for a share or before → after, bar-proof for a climb with the last bar in the accent), gather everything it handles with ui-orbit, and close on logo-sting. Type is the hero: huge, tight, one *italic serif* accent word per headline at most. Cut between full-bleed fields on the beat: accent and dark tones, circle and wipe transitions. One idea per beat; never hold a beat after it has landed.",
   },
 };
 
@@ -116,11 +128,12 @@ const Schema = z.object({
       highlight: z.string().describe("template: as its catalog entry says (usually a two-tone headline as \"line 1 / line 2\", or a lower-third label); otherwise empty"),
       fullscreen: z.boolean().describe("template only: true = cut away from the speaker to a full-screen scene on the kit's ground while the voice carries on (templates marked 'can be full-screen'); false otherwise"),
       tone: z.enum(["dark", "accent", "paper"]).describe("full-screen scenes: dark (warm ink with embers, the default), accent (full-bleed coral, one contrast beat such as the hook or end card) or paper (light cream with white cards: chat, orbit, approval scenes); dark otherwise"),
-      transition: z.enum(["fade", "slide", "wipe", "circle", "glitch"]).describe("full-screen scenes: how it comes in (slide up, wipe up, fade, a circle reveal from the centre for a big moment, a quick glitch cut); vary them"),
+      transition: z.enum(TRANSITIONS).describe("full-screen scenes: how it comes in (slide up, wipe up, fade, a circle reveal from the centre for a big moment, a quick glitch cut, blur: the master edit's soft blur crossfade into a big moment, or dive: through the screen with an RGB split, for app-flythrough and workflow-run, best right after the speaker shows a laptop or phone); vary them"),
     }),
   ).describe("logo moments and number moments, never overlapping"),
   sfx: z.array(z.object({ at: z.number().int(), sound: z.enum(SOUNDS) })).describe("extra sound effects; usually just the hook impact"),
-  camera: z.array(z.object({ ...Anchor, move: z.enum(["punch", "push", "pull", "shake", "zoom-blur", "whip", "flash", "bw", "rgb"]) })).describe("intentional camera moves and cut hits on the lines that matter"),
+  camera: z.array(z.object({ ...Anchor, move: z.enum(CAMERA_MOVES) })).describe("intentional camera moves and cut hits on the lines that matter"),
+  caption_marks: z.array(z.object({ ...Anchor, kind: z.enum(["quote", "caps", "box"]) })).describe("caption emphasis: quote = reported speech in italics, caps = one key phrase big in capitals, box = a red box behind one phrase; few and exact"),
   voice_fx: z.array(z.object({ ...Anchor, effect: z.enum(["muffle", "phone"]) })).describe("always an empty list: the creator wants the voice clean, never muffled or filtered"),
   sound: z.object({
     level: z.enum(["quiet", "normal", "punchy"]).describe("how much sound design overall; quiet when the creator says it's too much"),
@@ -135,7 +148,7 @@ const Schema = z.object({
 const SYSTEM = `You edit short paid social ads for a healthcare-business creator whose audience is doctors, chiropractors and physical therapists growing their practice. The raw footage is the speaker talking to camera, often with several takes of the same line, flubs and chatter between takes.
 
 Your job, in order:
-1. THE CUT. Keep only what sells. Be ruthless: once the value lines are said, jump straight to the final clean call-to-action take; everything between them (early or repeated CTAs, "learn how… implement… learn how" restarts, re-explaining) goes. When a line is said more than once, keep only the best complete take, the one that makes the most sense — usually the last one — and never keep the same footage in two places. The call to action is said exactly once, and the ad's last kept word is the CTA's last word ("…seven day free trial", "…click below", "…and learn more"): nothing after it ("or decide to be left behind", "Atlas is going to change your life", "see you inside"). The ad opens on the first word of the hook, with no stray fragment of another take before it. Drop false starts, stumbles, repeated words, "let me do that again", "okay", "cut", counting in, chatter to the crew, dead air, and anything off-message. Never keep half a sentence. Keep the natural order unless a stronger hook later in the footage should open the ad; the first two seconds must stop the scroll. Tight: a paid ad is usually 20–60 seconds.
+1. THE CUT. Keep only what sells. Be ruthless: once the value lines are said, jump straight to the final clean call-to-action take; everything between them (early or repeated CTAs, "learn how… implement… learn how" restarts, re-explaining) goes. When a line is said more than once, keep only the best complete take, the one that makes the most sense — usually the last one — and never keep the same footage in two places. The call to action is said exactly once, and the ad ends when the CTA line is finished — the whole line, never cut short ("…click below and get your AI employees started in your business today.", "…seven day free trial", "…and learn more") — and nothing after it ("or decide to be left behind", "Atlas is going to change your life", "see you inside"). The ad opens on the first word of the hook, with no stray fragment of another take before it. Drop false starts, stumbles, repeated words, "let me do that again", "okay", "cut", counting in, chatter to the crew, dead air, and anything off-message. Never keep half a sentence. Keep the natural order unless a stronger hook later in the footage should open the ad; the first two seconds must stop the scroll. Tight: a paid ad is usually 20–60 seconds.
 2. GRAPHICS. The look is the creator's "Atlas kit" (<house_style> and the catalog): minimal and calm. Dark warm glass with a thin accent hairline, small mono kickers, two-tone lines (cream, then the accent), soft blur-ins, slow 3D settles, and nothing that bounces or pops. Never stickers, emojis, badges or random glowing words. One idea on screen at a time.
  A) NUMBER moments (kind "number"): when the speaker says a number that sells (a price, a free trial length, money made, "24/7", a multiplier, a time saved), a big number card pops in on the word and counts up to it, then pops out. The creator loves these: EVERY money figure, "24/7" and free-trial length in the cut gets one. Never swap them for a checklist.
  C) CHECKLIST moments (kind "checklist"): when the speaker runs through what you get, the benefits or the steps, a glass task card lists them and ticks each one green as it's said (2–4 items, 2–5 words each, a short kicker as text). The creator loves these too. At most one or two per ad.
@@ -157,7 +170,13 @@ Your job, in order:
    - "shake": a short impact shake on a hard word ("never", "every single day", a painful number).
    - "bw": a black-and-white beat for the pain or the "old way" line (hold it for that phrase, 0.6–1.5 s).
    - "rgb": a colour split on "AI", "automated", "system", or a twist (it carries a soft air sound; never a glitch sound).
+   - "blur": the master edit's soft blur crossfade, the picture blurring and brightening for half a second as a riser peaks, into a big turn or reveal ("but here's the catch", "so let's get into it"). At most one per ad.
  Retention: in a short ad something should change every 1.5–3 seconds (a cut, a move, a hit or a graphic), and by 10 seconds at least 4 different visuals should have appeared.
+8. CAPTION MARKS (caption_marks), as in the creator's master edit. The captions stay plain white words; a few phrases get marked, on their exact words:
+   - "quote": words the speaker quotes or acts out, someone else's voice or thought ("oh, if ads are working so well…", "why would I do this?", "yeah, so good"). Up to 3 per ad, each the quoted words only.
+   - "caps": the one or two phrases the whole ad turns on, 1–3 words each ("content strategy", "paid ads", "done for you"). Shown big in capitals. At most 2.
+   - "box": a red box behind the twist, 1–3 words ("the catch", "the problem", "for free"). At most 1.
+   Never mark more than one phrase in the same sentence, never in the CTA, and leave the list empty when nothing earns it.
 7. VOICE FX (voice_fx): none, ever. The voice always plays clean: no muffle, phone or underwater effect (the creator: it makes the voice "go off" and takes the words away). Leave voice_fx empty.
 4. SOUND. Logo moments get their own sounds automatically. Add one low impact (impact-bass-1) on the first big claim in the hook, and nothing on ordinary jump cuts.
 5. GRADE (ignored when the creator has their own LUT, which is applied instead). Look at the frames: restore for flat, grey, low-contrast log footage (washed out, almost no colour); clean for already-good studio light; punchy for dull footage; warm for a premium or personal feel; cinematic for moody footage.
@@ -195,7 +214,7 @@ async function frame(src, at, out, signal) {
   return fs.readFile(out, { encoding: "base64" });
 }
 
-const KIT_FILE = path.join(ROOT, "ads", "references", "atlas-motion-kit.md");
+const KIT_FILE = KIT_REFERENCE;
 /** The house style, then the creator's favourite motion language (the Atlas kit) that every graphic follows. */
 const styleNotes = async () => {
   const [style, kit] = await Promise.all([STYLE_FILE, KIT_FILE].map((f) => fs.readFile(f, "utf8").then((s) => s.trim(), () => "")));
@@ -211,6 +230,11 @@ const productNotes = () => fs.readFile(PRODUCTS_FILE, "utf8").then((s) => s.trim
  */
 export async function planAd({ ctaStyle = null, direction = null, slides = [], recentTemplates = [], previous = null, testimonials = [], lessons = [], words, prompt = "", duration, aspect, videoFile, tmpDir, signal, luts = [], logos = [], options = {} }) {
   if (!hasClaudeKey()) return fallback(words, "Claude isn't connected, so this is a clean tighten with logos where they're named.", logos);
+  // The simple talking-head style (ads/styles.js) only uses the cut and the camera punches: Claude isn't shown the
+  // graphics it would plan (slides, templates, testimonials, the CTA design) or asked for numbers and checklists.
+  const simple = Boolean(editStyleOf(options)?.simple);
+  if (simple) [slides, testimonials, ctaStyle, direction] = [[], [], null, null];
+  const standing = simple ? STANDING_BRIEF.filter((l) => /retake|hook/i.test(l)) : STANDING_BRIEF;
   const content = [];
   try {
     await fs.mkdir(tmpDir, { recursive: true });
@@ -240,13 +264,13 @@ ${logos.length ? `Logos the creator uploaded: ${logos.map((l) => `${l.id} = ${l.
 ${luts.length ? `The creator also has their own LUTs in Assets (${luts.map((l) => l.title).join(", ")}); pick the closest built-in grade anyway.\n` : ""}
 ${previous ? `<previous_edit>\nThis is a RE-EDIT. The creator watched this version and wrote the request below as a correction. Start from it: apply exactly what they ask, keep everything they didn't mention (same takes, same graphics, same moves), and don't reinvent the ad.\n${previous}\n</previous_edit>\n\n` : ""}<standing_brief>
 The creator wants every ad edited with these, always (their request below adds to them and wins where it differs):
-${[...STANDING_BRIEF, OFFERS[offerOf(options)].brief].map((l) => `- ${l}`).join("\n")}
+${[...standing, OFFERS[offerOf(options)].brief].map((l) => `- ${l}`).join("\n")}
 </standing_brief>
 
 <creator_request>
 ${clean(prompt) || "Make this into a scroll-stopping ad."}
 </creator_request>
-${style ? `\n<house_style>\n${style}\n</house_style>\n` : ""}${products ? `\n<products>\n${products}\n</products>\n` : ""}\n<offer>\n${OFFERS[offerOf(options)].rule}\n</offer>\n\n${CTA_STYLES[ctaStyle] ? `<cta_style>\nThis ad's call to action is designed as "${CTA_STYLES[ctaStyle].name}": ${CTA_STYLES[ctaStyle].brief} Put it on the final CTA words (the offer's wording above), once, and no other CTA graphic in the ad. The creator wants every ad's CTA to look different from the last ones, so use this design, and write its lines fresh.\n</cta_style>\n\n` : ""}${DIRECTIONS[direction] ? `<creative_direction>\nThis ad's creative direction is "${DIRECTIONS[direction].name}": ${DIRECTIONS[direction].brief}\nBuild the ad around it: 3–5 template moments, most of them from this family, 2–4 of them full-screen scenes where the words describe what the product does (the numbers, checklist and CTA rules above still apply). You have creative freedom inside the kit: write fresh two-tone headlines and kickers in the product's voice, pair scenes (an orbit-network pushing into an agent-log, a notif-stack before a status-flood), vary tones and transitions. Make it look different from the creator's recent ads.\n</creative_direction>\n\n` : ""}<template_library>\n${templateCatalog()}\nUsed in the creator's recent ads (avoid these this time if another fits): ${recentTemplates.join(", ") || "none yet"}\n</template_library>\n${testimonials.length ? `\n<testimonials>\n${testimonials.map((t) => `${t.id}: ${t.name} (${t.product}): "${t.line}"`).join("\n")}\n</testimonials>\n` : ""}${lessons.length ? `\n<creator_corrections>\nWhat the creator told you after earlier ads. These are lessons for every ad, not just the one they were about:\n${lessons.map((l) => `- (${l.ad}) ${clean(l.prompt)}`).join("\n")}\n</creator_corrections>\n` : ""}
+${style ? `\n<house_style>\n${style}\n</house_style>\n` : ""}${products ? `\n<products>\n${products}\n</products>\n` : ""}\n<offer>\n${OFFERS[offerOf(options)].rule}\n</offer>\n\n${CTA_STYLES[ctaStyle] ? `<cta_style>\nThis ad's call to action is designed as "${CTA_STYLES[ctaStyle].name}": ${CTA_STYLES[ctaStyle].brief} Put it on the final CTA words (the offer's wording above), once, and no other CTA graphic in the ad. The creator wants every ad's CTA to look different from the last ones, so use this design, and write its lines fresh.\n</cta_style>\n\n` : ""}${DIRECTIONS[direction] ? `<creative_direction>\nThis ad's creative direction is "${DIRECTIONS[direction].name}": ${DIRECTIONS[direction].brief}\nBuild the ad around it: 3–5 template moments, most of them from this family, 2–4 of them full-screen scenes where the words describe what the product does (the numbers, checklist and CTA rules above still apply). You have creative freedom inside the kit: write fresh two-tone headlines and kickers in the product's voice, pair scenes (an orbit-network pushing into an agent-log, a notif-stack before a status-flood), vary tones and transitions. Make it look different from the creator's recent ads.\n</creative_direction>\n\n` : ""}${editStyleOf(options) ? `<editing_style>\nThe creator picked the "${editStyleOf(options).name}" editing style for this ad: ${editStyleOf(options).brief} This overrides any general guidance above about how busy or how calm the edit should be.\n</editing_style>\n\n` : ""}${simple ? "" : `<template_library>\n${templateCatalog()}\nUsed in the creator's recent ads (avoid these this time if another fits): ${recentTemplates.join(", ") || "none yet"}\n</template_library>\n`}${testimonials.length ? `\n<testimonials>\n${testimonials.map((t) => `${t.id}: ${t.name} (${t.product}): "${t.line}"`).join("\n")}\n</testimonials>\n` : ""}${lessons.length ? `\n<creator_corrections>\nWhat the creator told you after earlier ads, and what they fixed by hand in the timeline (words they put back or cut, graphics they added, removed or changed, sounds). These are lessons for every ad, not just the one they were about: learn the pattern behind each fix and apply it to this footage:\n${lessons.map((l) => `- (${l.ad}) ${clean(l.prompt)}`).join("\n")}\n</creator_corrections>\n` : ""}
 <transcript>
 ${numberedTranscript(words)}
 </transcript>

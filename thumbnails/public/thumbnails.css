@@ -44,3 +44,73 @@
 .tn-n { color: var(--faint); font: 11px var(--mono); }
 .tn-shotcard { cursor: pointer; }
 .tn-shotcard .tn-title b { font-size: 14px; }
+
+/* SOP: type, score and the checklist */
+.tn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tn-chips:empty { display: none; }
+.tn-score.pass { border-color: color-mix(in srgb, var(--positive) 30%, transparent); color: var(--positive); }
+.tn-score.miss { border-color: color-mix(in srgb, var(--warn) 32%, transparent); color: var(--warn); }
+.tn-concept { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: -4px 0 14px; color: var(--muted); }
+.tn-concept:empty { display: none; }
+.tn-concept b { color: var(--text); font-weight: 600; }
+.tn-concept i { color: var(--faint); font-style: normal; }
+
+.tn-edit-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .tn-edit-grid { grid-template-columns: 1fr; } }
+.tn-checks { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
+.tn-checks.empty-checks { align-items: flex-start; gap: 12px; }
+.tn-checks-head { display: flex; align-items: center; gap: 10px; }
+.tn-checks-head b { color: var(--text); font-size: 13.5px; font-weight: 600; }
+.tn-checks-head .spacer { flex: 1; }
+.tn-checks ul { display: flex; flex-direction: column; gap: 7px; margin: 2px 0 0; padding: 0; list-style: none; }
+.tn-checks li { display: flex; align-items: flex-start; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.35; }
+.tn-checks li svg { flex: none; margin-top: 2px; }
+.tn-checks li.pass svg { color: var(--positive); }
+.tn-checks li.miss svg { color: var(--danger); }
+.tn-checks li small { display: block; color: var(--faint); font-size: 11.5px; }
+.tn-fixed { margin: 0; color: var(--text-2); }
+
+.tn-variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.tn-variants button { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-deep); cursor: pointer; text-align: left; opacity: 0.72; transition: border-color var(--fast) var(--ease), opacity var(--fast) var(--ease); }
+.tn-variants button:hover { opacity: 1; border-color: var(--line-3); }
+.tn-variants button.on { opacity: 1; border-color: var(--text); }
+.tn-variants img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
+.tn-variants span { display: block; padding: 5px 8px 6px; color: var(--muted); font-size: 11.5px; background: var(--surface); }
+.tn-variants b { color: var(--text); }
+.tn-modal .tn-form { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+
+/* From your photos */
+.tn-upload { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.tn-upload-head h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
+.tn-upload-head p { max-width: 80ch; margin: 0; }
+.tn-picked { display: flex; flex-wrap: wrap; gap: 10px; }
+.tn-picked:empty { display: none; }
+.tn-picked figure { position: relative; width: 120px; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.tn-picked img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+.tn-picked button { position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--text); cursor: pointer; }
+.tn-upload-form { margin-top: 0; }
+.tn-upload-go { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+
+/* Upload from anywhere: the header button, the page as a drop target, and the editor's own-photo tile */
+.tn-upload-btn { cursor: pointer; }
+.tn-page.dropping { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 8px; border-radius: var(--radius); }
+.tn-addphoto { display: flex; flex: none; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 104px; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); cursor: pointer; transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.tn-addphoto:hover { border-color: var(--line-3); background: var(--surface-3); }
+.tn-addphoto span { color: var(--muted); font-size: 11px; text-align: center; }
+.tn-modal.over { outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -8px; }
+
+/* Your style */
+.tn-profile { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.tn-profile h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
+.tn-profile p { max-width: 80ch; margin: 0; color: var(--text-2); line-height: 1.55; }
+.tn-profile-head { display: flex; align-items: center; gap: 12px; }
+.tn-profile-head .spacer { flex: 1; }
+.tn-profile-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.tn-profile-cols b { color: var(--text); font-size: 13px; font-weight: 600; }
+.tn-profile-cols ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.tn-swatch { display: inline-block; width: 11px; height: 11px; border: 1px solid var(--line-3); border-radius: 50%; }
+.tn-ref .tn-shot { cursor: default; }
+.tn-ref-link { position: absolute; right: 8px; bottom: 8px; padding: 3px 9px; border-radius: var(--pill); background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--text); font-size: 11.5px; }
+.tn-wrap { white-space: normal; line-height: 1.45; }
+.tn-ref-note { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); font-size: 12.5px; outline: none; }
+.tn-ref-note:focus { border-color: var(--line-3); }

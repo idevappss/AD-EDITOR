@@ -3,13 +3,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { FFMPEG, run } from "../lib/tools.js";
+import { SFX_DIR } from "../motion/index.js";
 import { gradeChain, TRANSITIONS } from "./looks.js";
 import { buildAss } from "./text.js";
 
 export const FPS = 30;
-const SFX_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "sfx");
 const f3 = (n) => (Math.round(n * 1000) / 1000).toString();
 
 let encoderCheck;

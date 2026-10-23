@@ -7,28 +7,25 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ASPECTS, groupCaptions, normalizeDesign } from "../lib/compose.js";
 import { ROOT } from "../lib/tools.js";
+import { CAPTION_LINE } from "../lib/facezone.js";
 import { clipMusic, subtractRanges } from "../lib/clipplan.js";
 import { formatMoney } from "../lib/money.js";
 import { tightenClip } from "../lib/tighten.js";
+import { editStyleOf } from "./styles.js";
 import { DATA_DIR as EDITOR_DIR } from "../editor/media.js";
-import { CTA_CLICK, GRADES, LOOKS, SFX, TRANSITIONS, listTimes, parseStat, statCount } from "./graphics.js";
-import { TEMPLATES, templateSfx } from "./templates/index.js";
+import { AMBIENT_SFX, BANNED_SFX, BED_LEVEL, CTA_CLICK, GRADES, LOOKS, PEAK, ROLE_LEVEL, SCENE_SOUND, SFX, SFX_GAIN, SFX_ROLE, TEMPLATES, TRANSITIONS, libraryOf, listTimes, parseStat, statCount, templateHits } from "../motion/index.js";
 
 export const AD_CLIP = "ad";
 const r3 = (n) => Math.round(n * 1000) / 1000;
 const norm = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 const clampIdx = (i, n) => Math.min(n - 1, Math.max(0, Math.round(Number(i) || 0)));
 
-/** Where each sound effect peaks, in seconds into its file: sounds are placed so the peak lands on the moment. */
-const PEAK = { "whoosh-cinematic": 2.9, riser: 3.0, "impact-bass-1": 0.1, "impact-bass-2": 1.85, "whoosh-short": 0.15, whoosh: 0.3, pop: 0.02, crash: 0.02, click: 0.02, cash: 0.1, counter: 0,
-  slice: 0.3, bell: 0.01, boom: 1.3, bloop: 0.01, tick: 0.005, air: 0.5, chirp: 0.02, ticker: 0, ping: 0.01, bigswoosh: 0.35, revswell: 1.05, whistle: 0.07, swoosh: 0.22 };
-
 /**
  * Sound palettes, so ads don't all sound the same: the same moments, different sounds. "classic" is the original
  * set; each palette maps a classic sound to its own (null = leave it out). Chosen per ad, never the same twice running.
  */
 // Cut hits: how long each lasts on the timeline, and the sound that sells it (by peak time).
-const HIT_LEN = { shake: 0.35, "zoom-blur": 0.3, whip: 0.28, flash: 0.35, bw: 1, rgb: 0.45 };
+const HIT_LEN = { shake: 0.35, "zoom-blur": 0.3, whip: 0.28, flash: 0.35, bw: 1, rgb: 0.45, blur: 0.5 };
 const HIT_SFX = {
   shake: [["impact-bass-1", 0, 0.4]],
   "zoom-blur": [["boom", 0.2, 0.42]],
@@ -36,14 +33,16 @@ const HIT_SFX = {
   flash: [["bigswoosh", 0.05, 0.4]],
   bw: [["slice", 0, 0.4]],
   rgb: [["air", 0, 0.3]],
+  // The master edit's blur crossfade: a riser that peaks as the blur does.
+  blur: [["riser", 0.2, 0.3]],
 };
 
 /**
  * Never in an ad (the creator): the glitch sounds clash (2026-09-28), and no voice effect at all: underwater "takes the
  * words away" (2026-09-28) and muffle made "the guy's voice go off" (2026-09-29), so the voice always plays clean.
- * They all still exist for the rest of the app (edits/sfx, ads/voicefx.js); the Ads Editor just never uses them.
+ * They all still exist for the rest of the app (motion/sfx, ads/voicefx.js); the Ads Editor just never uses them.
+ * The banned sounds (BANNED_SFX), the peaks, the ambience list and the 0.7 gain live in motion/sounds.js.
  */
-export const BANNED_SFX = new Set(["glitch-1", "glitch-2"]);
 export const BANNED_VOICEFX = new Set(["underwater", "muffle", "phone"]);
 
 /**
@@ -51,7 +50,7 @@ export const BANNED_VOICEFX = new Set(["underwater", "muffle", "phone"]);
  * The music bed sits at 0.112 (the house bed is 0.13, about 1.3 dB quieter); every sound effect is scaled by 0.7.
  */
 export const AD_MUSIC_LEVEL = 0.112;
-export const AD_SFX_GAIN = 0.7;
+export const AD_SFX_GAIN = SFX_GAIN;
 
 /**
  * The loudness guard (the creator, 2026-09-28: "the swoosh sounds are too loud… make sure the background noises are not
@@ -60,14 +59,19 @@ export const AD_SFX_GAIN = 0.7;
  *   - whooshes, swooshes, air and risers never play louder than the music bed;
  *   - everything else (clicks, pops, dings, hits) stays at least 12 dB under the voice.
  * Levels measured going into the mix: the cleaned voice ~-12.5 LUFS, the bed ~-13.5 LUFS scaled by its level (-32.5
- * at 0.112). The renderer plays effects at 0.8 of their clip volume (ads/graphics.js).
+ * at 0.112). The renderer plays effects at 0.8 of their clip volume (motion/render.js).
  */
-export const AMBIENT_SFX = new Set(["whoosh", "whoosh-short", "whoosh-cinematic", "swoosh", "bigswoosh", "air", "revswell", "riser", "atlas-whoosh", "atlas-riser"]);
 const VOICE_LUFS = -12.5;
 const MUSIC_LUFS = -13.5 + 20 * Math.log10(AD_MUSIC_LEVEL);
+/**
+ * The studio palette's music bed: 14 dB under the voice, as in the reference edit the creator called perfect
+ * (motion/references/sound-study.md, 2026-10-23), about 6 dB up on the house ad bed.
+ */
+export const STUDIO_MUSIC_LEVEL = Math.round(10 ** ((VOICE_LUFS + BED_LEVEL + 13.5) / 20) * 1000) / 1000;
 export function sfxCap(name, loudness) {
   if (!Number.isFinite(loudness)) return Infinity;
-  const target = AMBIENT_SFX.has(name) ? MUSIC_LUFS : VOICE_LUFS - 12;
+  // The pack sounds play at their role's level from the reference (cuts, clicks, risers, booms); the rest as before.
+  const target = SFX_ROLE[name] ? VOICE_LUFS + ROLE_LEVEL[SFX_ROLE[name]] : AMBIENT_SFX.has(name) ? MUSIC_LUFS : VOICE_LUFS - 12;
   return 10 ** ((target - loudness) / 20) / 0.8;
 }
 
@@ -75,11 +79,22 @@ export const PALETTES = {
   classic: {},
   crisp: { cash: "bell", pop: "tick", counter: "ticker", "impact-bass-1": "boom", "whoosh-short": "swoosh", whoosh: "swoosh", crash: "slice", "whoosh-cinematic": "revswell", riser: null, click: "tick" },
   airy: { cash: "ping", pop: "bloop", counter: "ticker", "impact-bass-1": "boom", "whoosh-short": "air", whoosh: "air", "whoosh-cinematic": "bigswoosh", riser: null, click: "click" },
+  // The reference edit (motion/references/sound-study.md): the creator's own pack, by role ("@cut" = one of the quick
+  // whips, rotating). Whips on cuts, shutter clicks as things appear, risers that peak on the cut, deep booms.
+  studio: {
+    whoosh: "@cut", "whoosh-short": "@cut", swoosh: "@cut", air: "@ui", "atlas-whoosh": "@cut", bigswoosh: "@cut",
+    pop: "@ui", tick: "@ui", click: "@ui", ping: "@ui", bloop: "@ui", chirp: "@ui", "atlas-pop": "@ui", "atlas-click": "@ui", "atlas-marker": "@ui", "atlas-typing": "@ui",
+    riser: "@riser", "atlas-riser": "@riser", "whoosh-cinematic": "@riser", revswell: "@riser",
+    "impact-bass-1": "@boom", "impact-bass-2": "@boom", boom: "@boom", "atlas-impact": "@boom",
+    cash: "@land", bell: "@land", "atlas-ding": "@land", "atlas-success": "@land", counter: "ticker",
+  },
 };
+/** The studio palette needs the creator's pack on this machine. */
+export const studioReady = () => libraryOf("cut").length > 0;
 
 /** Automatic sound design per graphic: [sound, offset from the graphic's start, volume]. */
 const GRAPHIC_SFX = {
-  // Soft UI sounds to match the minimal motion (ads/references/atlas-motion-kit.md): air, ticks and pings, no pops.
+  // Soft UI sounds to match the minimal motion (motion/references/atlas-motion-kit.md): air, ticks and pings, no pops.
   headline: [["air", -0.05, 0.3]],
   stat: [],
   list: [["air", -0.05, 0.3]],
@@ -116,7 +131,7 @@ export function captionClips(words, D, design) {
     type: "caption",
     start: g.in,
     duration: r3(g.out - g.in),
-    words: g.words.map((w) => ({ text: w.text, s: r3(Math.max(0, w.s - g.in)), e: r3(Math.max(0, w.e - g.in)) })),
+    words: g.words.map((w) => ({ text: w.text, s: r3(Math.max(0, w.s - g.in)), e: r3(Math.max(0, w.e - g.in)), ...(w.mark ? { mark: w.mark } : {}) })),
   }));
 }
 
@@ -421,6 +436,19 @@ export function retakeSpans(ranges, words) {
   const keys = order.map(wordKey);
   const cut = new Set();
   const CTA_PHRASES = [["click", "below"], ["link", "below"], ["comment", "below"], ["learn", "more"], ["free", "trial"], ["book", "a", "call"]];
+  // The clause a word sits in (to the nearest full stop, comma or real pause, at most 12 words each way).
+  const clause = (i) => {
+    let a = i;
+    while (a > 0 && i - a < 12 && !/[.?!,;]$/.test(String(order[a - 1].text)) && order[a].start - order[a - 1].end < 0.45) a--;
+    let b = i;
+    while (b < order.length - 1 && b - i < 12 && !/[.?!,;]$/.test(String(order[b].text)) && order[b + 1].start - order[b].end < 0.45) b++;
+    return keys.slice(a, b + 1).filter(Boolean);
+  };
+  const sameLine = (i, m) => {
+    const x = clause(i);
+    const y = new Set(clause(m));
+    return x.filter((k) => y.has(k)).length / Math.max(x.length, y.size, 1) >= 0.6;
+  };
   const repeatAt = (i) => {
     for (const p of CTA_PHRASES) {
       if (p.every((k, j) => keys[i + j] === k)) {
@@ -428,10 +456,12 @@ export function retakeSpans(ranges, words) {
       }
     }
     if (i + 4 > keys.length || keys.slice(i, i + 4).some((k) => !k)) return 0;
-    // Four words said again in another take is a retake; inside one take it's rhetoric ("You don't need to learn how
-    // to code. You don't need to learn any technicalities.") and stays.
+    // Four words said again in another take is a retake only when the whole line around them is the same line said
+    // again. Inside one take it's rhetoric ("You don't need to learn how to code. You don't need to learn any
+    // technicalities."), and a refrain inside different lines stays too (ad #16: "…and it goes to do the work for you"
+    // / "…having AI employees do the work for you today" — the creator put the first back).
     const four = keys.slice(i, i + 4).join(" ");
-    for (let m = i + 4; m + 4 <= keys.length; m++) if (take[m] !== take[i] && keys.slice(m, m + 4).join(" ") === four) return 4;
+    for (let m = i + 4; m + 4 <= keys.length; m++) if (take[m] !== take[i] && keys.slice(m, m + 4).join(" ") === four && sameLine(i, m)) return 4;
     return 0;
   };
   for (let i = 0; i < order.length; i++) {
@@ -460,6 +490,12 @@ const SIGNOFF_RE = /^(see you|your choice|let'?s go|talk soon|thank you|thanks|i
 
 /** The word a call to action ends on ("…free trial", "…click below", "…learn more", "…book a call"). */
 const CTA_END = /^(trial|trail|below|more|call|link|comment|bio|started|access|free|today|now)[.,!?]*$/i;
+
+/** What may follow the last CTA word and still be cut: sign-offs, alternatives, a new clause about something else. */
+const TAIL_CUT_RE = /^[,.\s]*(or\b|see you|your choice|let'?s go|talk soon|thank|thanks|i'?ll see|so i encourage|don'?t miss|atlas (is|will)|it'?s going to|it will|this (is going to|will)|that'?s it|peace|bye)/i;
+
+/** Words a graphic puts on screen (its headline, lines and items), for how long it needs to be read. */
+const readWords = (g) => [g.text, g.sub, g.highlight, ...(g.items || [])].filter((x) => x && x !== "-").join(" ").replace(/[|;:*]/g, " ").split(/\s+/).filter(Boolean).length;
 
 /** A call-to-action sentence: what the ad ends on (the free trial, the call, "click below"…). */
 export const CTA_RE = /\b(free trial|trial|below|link|comment|book(?:ed|ing)?|sign up|get started|dm|learn more|find out|try it|check it out|see how|get access|join)\b/i;
@@ -504,14 +540,21 @@ export function endOnCta(pieces, words, levels = null, planWords = null) {
   if (last !== undefined && last < pick) {
     const tailFrom = kept[last].w.end - 0.05;
     const heardAfter = [...kept.slice(last + 1, pick + 1).map((x) => x.w), ...(planWords || []).filter((p) => p.start > tailFrom && p.start < pieces[kept[pick].pi].end)];
-    if (!CTA_RE.test(heardAfter.map((x) => x.text).join(" "))) pick = last;
+    // Only a tail that isn't part of the CTA comes off: a sign-off, an "or…" alternative, or a new clause about
+    // something else. A continuation of the instruction stays whole (the creator, 2026-09-29: "Click below | and get
+    // your AI employees started in your business today" was cut off after "below").
+    const tail = kept.slice(last + 1, pick + 1).map((x) => x.w.text).join(" ");
+    if (TAIL_CUT_RE.test(tail) && !CTA_RE.test(heardAfter.map((x) => x.text).join(" "))) pick = last;
   }
   const { w, pi } = kept[pick];
   // Never into the next word said: the next kept word, or the next word in the long transcript (a re-transcribed
   // take can stretch "below." over an untranscribed "see you").
-  // (The long transcript's timing drifts, so its words that are part of the CTA sentence itself don't count.)
-  const said = new Set(kept.slice(s0, pick + 1).map((x) => wordKey(x.w)));
-  const planNext = (planWords || []).find((p) => p.start > w.start + 0.05 && !said.has(wordKey(p)));
+  // The long transcript's timing drifts and it spells words its own way ("seven-day" / "seven day", "7" / "seven"), so
+  // its next word is found from where it has this same last word (nearest within a second), never by skipping words
+  // that don't match (that once took "free" for the next word and cut the ad off before "free trial").
+  const lk = wordKey(w);
+  const match = (planWords || []).map((p, i) => ({ p, i })).filter(({ p }) => { const k = wordKey(p); return k && (k === lk || k.endsWith(lk) || lk.endsWith(k)) && Math.abs(p.start - w.start) < 1.0; }).sort((a, b) => Math.abs(a.p.start - w.start) - Math.abs(b.p.start - w.start))[0];
+  const planNext = match ? planWords[match.i + 1] : null;
   const nextKept = kept[pick + 1]?.pi === pi ? kept[pick + 1].w.start - 0.02 : Infinity;
   const nextPlan = planNext && planNext.start > w.start + 0.15 ? planNext.start - 0.02 : Infinity;
   let end = Math.min(pieces[pi].end, w.end + 0.4, nextKept, nextPlan);
@@ -520,6 +563,10 @@ export function endOnCta(pieces, words, levels = null, planWords = null) {
   if (levels) {
     const run = speechBursts(levels, w.start, w.end + 0.6).filter((b) => b.start <= end + 0.05).at(-1);
     if (run) end = Math.max(end, Math.min(run.end + 0.06, w.end + 0.35, nextPlan, pieces[pi].end));
+  }
+  // Safety net: the end never lands inside a word of the CTA itself as the long transcript heard it ("…free | trial").
+  for (const p of planWords || []) {
+    if (p.start < end - 0.02 && p.end > end + 0.02 && p.start > w.start - 1.2 && CTA_END.test(String(p.text).replace(/-/g, " ").split(" ").pop()) && p.end - end < 0.8) end = Math.min(pieces[pi].end + 0.8, p.end + 0.08);
   }
   pieces[pi].end = r3(Math.max(w.start + 0.15, end));
   pieces.length = pi + 1;
@@ -558,6 +605,10 @@ export function endOnVoice(pieces, levels) {
 export async function buildAdDocument({ project, plan, words, aspect, options = {}, sfxDuration, levels = null, realign = null }) {
   words = [...words]; // keepRanges may re-time mistimed edge words onto their real sound
   VOICE_DB = voiceThreshold(levels);
+  // Talking head (Basic, ads/styles.js `simple`): the cut, captions and a pop-in on the lines that matter. No graphics,
+  // automatic number cards or CTA button, sound effects, voice effects or cut hits, whatever the plan asked for.
+  const simple = Boolean(editStyleOf(options)?.simple);
+  if (simple) plan = { ...plan, graphics: [], sfx: [], voice_fx: [], emphasis: [], auto_numbers: false, camera: (plan.camera || []).filter((m) => m.move === "punch") };
   const n = words.length;
   const ranges = keepRanges(plan, words, levels);
   // Long-video word timings drift by up to a second; each kept take re-transcribed on its own is exact. Its words
@@ -628,7 +679,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   if (!ranges.length) throw new Error("There's nothing left to keep in this video.");
   // Dead air goes, whatever the transcript says: each range keeps only where the voice is actually going (gaps
   // under a quarter second bridged), like a hand jump-cut. Then the usual filler and pause tightening.
-  const tight = tightenClip(words, speechOnly(ranges, words, levels, (options.exclude || []).filter((e) => e.silent)), { filler: true, pauseMax: 0.3, pauseKeep: 0.1, minPiece: 0.9, absorbMax: 0.2 });
+  const tight = tightenClip(words, speechOnly(ranges, words, levels, (options.exclude || []).filter((e) => e.silent)), { filler: true, pauseMax: 0.3, pauseKeep: 0.1, ...editStyleOf(options)?.pace, minPiece: 0.9, absorbMax: 0.2 });
   dropSlivers(tight.parts, words);
   dropLeadIsland(tight.parts, words);
   endOnCta(tight.parts, words, levels, planWords);
@@ -646,26 +697,45 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const wordEnd = (i) => at(planWords[clampIdx(i, n)].end);
 
   const tall = ASPECTS[aspect]?.height > ASPECTS[aspect]?.width;
-  const grade = GRADES[plan.grade] ? plan.grade : "clean";
+  // No grade (the creator, 2026-10-21): the footage comes in already coloured, so it plays as shot, like the LUTs
+  // (ads/index.js resolveLut). Claude's grade pick is ignored.
+  const grade = "none";
   const design = normalizeDesign({
     style: "talk",
     aspect,
     captions: options.captions === true,
-    // Small and low, clear of the face (the creator's call).
-    captionY: tall ? 80 : 86,
-    captionScale: 0.45,
-    // Plain captions: no italic serif emphasis (the creator's rule).
-    highlight: "none",
-    // The ad's own framing program (ads/graphics.js adFraming) replaces the composer's drift and punches.
+    // The reference reel's captions (lib/facezone.js, the creator 2026-10-22): a word or two, lowercase, bold tight
+    // Helvetica about 94 px tall on 1080, centered on the chest line. motion/render.js moves one off the face.
+    captionY: tall ? CAPTION_LINE : 86,
+    captionScale: 0.8,
+    maxWords: 2,
+    lowercase: true,
+    tracking: -3,
+    // Plain captions: no italic serif emphasis (the creator's rule). With the studio sound, the master edit's captions:
+    // each word rises in as it's said, with the planner's marks (quotes in italics, a phrase in caps, a red box).
+    highlight: options.palette === "studio" ? "studio" : "none",
+    // The ad's own framing program (motion/render.js adFraming) replaces the composer's drift and punches.
     motion: "none",
     zoom: false,
     autoFrame: true,
+    framing: simple ? "key" : "rhythm",
     musicBed: options.music === true && plan.music !== false ? "auto" : "none",
-    musicLevel: AD_MUSIC_LEVEL,
+    musicLevel: options.palette === "studio" ? STUDIO_MUSIC_LEVEL : AD_MUSIC_LEVEL,
     grade: grade === "none" ? "none" : "clean",
     lut: options.lut || "none",
     ...(options.accent ? { accentColor: options.accent } : {}),
   });
+
+  // Caption marks (the master edit, motion/references/sound-study.md): reported speech in italics, at most two key
+  // phrases in big capitals and one red box, each on the words the planner anchored it to.
+  const LIMIT = { quote: 3, caps: 2, box: 1 }, SPAN = { quote: 10, caps: 3, box: 3 };
+  const used = {};
+  for (const m of design.highlight === "studio" ? plan.caption_marks || [] : []) {
+    if (!LIMIT[m.kind] || (used[m.kind] = (used[m.kind] || 0) + 1) > LIMIT[m.kind]) continue;
+    const t0 = wordAt(m.at) - 0.02, t1 = wordEnd(Math.max(m.at, m.until ?? m.at)) - 0.02;
+    const hit = tight.words.filter((w) => w.s >= t0 && w.s <= t1 && !w.mark);
+    if (hit.length && hit.length <= SPAN[m.kind]) hit.forEach((w) => (w.mark = m.kind));
+  }
 
   // Captions on the cut timeline, grouped the way the composer groups them.
   const captions = captionClips(tight.words, D, design);
@@ -682,6 +752,8 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   for (const [i, { g, t0, t1: end }] of planned.entries()) {
     const next = planned[i + 1];
     let t1 = Math.max(end, t0 + (g.look === "list" ? 1.2 + (g.items?.length || 1) * 0.7 : g.look === "cta" ? 2.6 : g.look === "proof" || g.look === "slide" ? 3.2 : TEMPLATES[g.look]?.minLen || 1.8));
+    // Long enough to read (motion-graphics-director: ~3 words a second on screen, plus the entrance), up to 5 s.
+    t1 = Math.max(t1, t0 + Math.min(5, 0.6 + readWords(g) / 3));
     t1 = Math.min(t1, t0 + (g.look === "cta" ? 9 : 7), D, next ? next.t0 - 0.12 : D);
     const prev = graphics.at(-1);
     if (prev && t0 < prev.start + prev.duration) {
@@ -691,7 +763,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     }
     if (t1 - t0 < 1.2) continue;
     // Style rotation for the built-in looks (a different number card or CTA from the last ad).
-    const variant = g.look === "stat" && options.variants?.stat === "pill" ? { variant: "pill" } : {};
+    const variant = g.look !== "stat" ? {} : options.palette === "studio" ? { variant: "studio" } : options.variants?.stat === "pill" ? { variant: "pill" } : {};
     const look = g.look === "cta" && options.variants?.cta === "sonar" ? "sonar-cta" : g.look;
     graphics.push({
       ...variant,
@@ -731,11 +803,11 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const t0 = r3(Math.max(0, m.s - 0.1));
     const t1 = r3(Math.min(D, t0 + 1.8));
     if (t1 - t0 < 1.2 || graphics.some((g) => t0 < g.start + g.duration + 0.2 && t1 > g.start - 0.2)) continue;
-    graphics.push({ id: `g${graphics.length + 1}`, type: "graphic", start: t0, duration: r3(t1 - t0), look: "stat", text: m.text, sub: "", highlight: "", items: [], icon: "", position: "center" });
+    graphics.push({ id: `g${graphics.length + 1}`, type: "graphic", start: t0, duration: r3(t1 - t0), look: "stat", ...(options.palette === "studio" ? { variant: "studio" } : {}), text: m.text, sub: "", highlight: "", items: [], icon: "", position: "center" });
   }
   // The click button is never optional either: when the speaker says "click / tap / comment…" and there's no CTA,
   // the button goes on that word (it takes the spot over any card already there).
-  if (!graphics.some((g) => g.look === "cta" || TEMPLATES[g.look]?.job === "cta")) {
+  if (!simple && !graphics.some((g) => g.look === "cta" || TEMPLATES[g.look]?.job === "cta")) {
     const ask = said.find((w, i) => /^(click|tap|comment|dm)$/i.test(String(w.text).replace(/[^a-z]/gi, "")) && i > said.length * 0.5);
     if (ask) {
       const t0 = r3(Math.max(0, ask.s - 0.1));
@@ -751,28 +823,54 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     }
   }
   graphics.sort((a, b) => a.start - b.start);
+  // The close holds at least 1.5 s (motion-graphics-director): a CTA landing in the ad's last moments starts earlier,
+  // as long as it stays inside the CTA line's own stretch (never over the value lines before it).
+  const cta = graphics.findLast((g) => g.look === "cta" || g.look === "sonar-cta" || TEMPLATES[g.look]?.job === "cta");
+  if (cta && D - cta.start < 1.6) {
+    const before = graphics.filter((g) => g !== cta && g.start < cta.start).at(-1);
+    const floor = Math.max(before ? before.start + before.duration + 0.1 : 0, cta.start - 1.2);
+    const start = r3(Math.max(floor, D - 1.6));
+    if (start < cta.start) {
+      cta.duration = r3(cta.start + cta.duration - start);
+      cta.start = start;
+    }
+  }
   graphics.forEach((g, i) => (g.id = `g${i + 1}`));
   // Scenes the plan didn't give a transition rotate through them, so two cutaways never come in the same way.
   graphics.filter((g) => g.fullscreen).forEach((g, i) => (g.transition ||= ["slide", "wipe", "fade", "circle"][i % 4]));
   const busy = (t0, t1) => graphics.some((g) => t0 < g.start + g.duration && t1 > g.start);
 
-  // Intentional camera moves (punch in / slow push / pull out), never under a graphic: ads/graphics.js frames them.
+  // Intentional camera moves (punch in / slow push / pull out), never under a graphic: motion/render.js frames them.
   const camera = [];
   const clash = (t0, t1) => graphics.some((g) => t0 < g.start + g.duration && t1 > g.start - 0.1) || camera.some((c) => t0 < c.start + c.duration && t1 > c.start);
   // Cut hits (FastFX / CapCut-style): short effects on the footage, each with its sound. Transitions sit on the cut.
   const cuts = parts.slice(1).map((p) => p.t);
+  // Where the sentence being said at t gives way to the next one: just before the first word after its full stop (or
+  // after a clear pause), else the end of the ad.
+  const sentenceChange = (t) => {
+    const i = said.findIndex((w, k) => w.e >= t - 0.05 && (/[.?!]$/.test(String(w.text)) || (said[k + 1] && said[k + 1].s - w.e > 0.6)));
+    return i >= 0 && said[i + 1] ? r3(said[i + 1].s - 0.05) : D;
+  };
   const nearCut = (t) => cuts.reduce((best, c) => (Math.abs(c - t) < Math.abs(best - t) ? c : best), Infinity);
   for (const m of [...(plan.camera || [])].sort((a, b) => a.at - b.at)) {
     let t0 = r3(Math.max(0, wordAt(m.at) - 0.04));
     let t1;
     if (["punch", "push", "pull"].includes(m.move)) {
       t1 = r3(Math.min(D, Math.max(t0 + (m.move === "push" ? 1.2 : 0.8), wordEnd(Math.max(m.at, m.until ?? m.at)) + 0.1), t0 + (m.move === "push" ? 4 : 3)));
+      // Talking head (the creator, 2026-10-21): a pop-in holds until the sentence changes, not just for the line.
+      if (simple) t1 = r3(Math.min(D, t0 + 8, Math.max(t1, sentenceChange(wordEnd(Math.max(m.at, m.until ?? m.at))))));
       if (t1 - t0 < 0.5) continue;
     } else if (HIT_LEN[m.move]) {
       const cut = nearCut(t0);
       if (["whip", "flash"].includes(m.move) && Math.abs(cut - t0) < 0.6) t0 = r3(Math.max(0, cut - (m.move === "whip" ? 0.12 : 0.05)));
       t1 = m.move === "bw" ? r3(Math.min(D, t0 + 1.5, Math.max(t0 + 0.6, wordEnd(Math.max(m.at, m.until ?? m.at)) + 0.1))) : r3(Math.min(D, t0 + HIT_LEN[m.move]));
     } else continue;
+    // …and the next important line, said while it's in or right after, keeps it in rather than popping out and back.
+    const last = camera.at(-1);
+    if (simple && last && t0 <= last.start + last.duration + 0.8) {
+      last.duration = r3(Math.min(12, Math.max(last.duration, t1 - last.start)));
+      continue;
+    }
     if (clash(t0, t1) || camera.filter((c) => HIT_LEN[c.move]).length >= 5) continue;
     camera.push({ id: `k${camera.length + 1}`, type: "camera", start: t0, duration: r3(t1 - t0), move: m.move });
   }
@@ -809,8 +907,23 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const avoid = new Set(plan.sound?.avoid || []);
   const level = { quiet: 0.6, normal: 1, punchy: 1.2 }[plan.sound?.level] ?? 1;
   const swap = PALETTES[options.palette] || {};
+  const turns = {};
   const addSfx = (name, t, volume, extra = {}) => {
     if (name in swap) name = swap[name];
+    // A role from the studio palette: the next of that role's pack sounds, so repeats rotate. Booms twice at most.
+    let shade = null;
+    if (String(name).startsWith("@")) {
+      const role = name.slice(1), list = libraryOf(role);
+      if (role === "boom" && sounds.filter((s) => SFX_ROLE[s.sfx] === "boom").length >= 2) return;
+      if (role === "riser" && level < 1) return;
+      // One sound per moment, as in the reference: nothing of the same role within 0.35 s of another.
+      if (sounds.some((s) => SFX_ROLE[s.sfx] === role && Math.abs(s.start + (PEAK[s.sfx] ?? 0) - (s.offset || 0) - t) < 0.35)) return;
+      name = list.length ? list[(turns[role] = (turns[role] ?? -1) + 1) % list.length] : null;
+      // The role's level is the point; the hit's own volume only shades it (a soft hit plays a little under).
+      shade = Math.min(1, Math.max(0.6, volume / 0.45));
+      // A riser stops dead on the cut it peaks into, as in the reference.
+      if (role === "riser" && name) extra = { ...extra, duration: Math.min(extra.lead ?? PEAK[name] ?? 1, PEAK[name] ?? 1) + 0.08 };
+    }
     if (!name || !SFX[name] || options.sfx === false || avoid.has(name) || BANNED_SFX.has(name)) return;
     volume *= level;
     // Quiet: only the sounds that carry a moment (hits on logos/X, pops, clicks, cha-ching), no build-ups.
@@ -823,14 +936,23 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const start = r3(Math.max(0, t));
     if (start >= D || sounds.some((s) => s.sfx === name && Math.abs(s.start - start) < 0.15)) return;
     const len = Math.max(0.2, Math.min(extra.duration, 3.5, D - start));
-    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: r3(Math.min(volume * AD_SFX_GAIN * (options.sfxLevel ?? 1), sfxCap(name, options.sfxLoudness?.(name)))), ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
+    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: r3(shade != null && Number.isFinite(sfxCap(name, options.sfxLoudness?.(name))) ? sfxCap(name, options.sfxLoudness?.(name)) * shade * (options.sfxLevel ?? 1) : Math.min(volume * AD_SFX_GAIN * (options.sfxLevel ?? 1), sfxCap(name, options.sfxLoudness?.(name)))), ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
   };
+  // The reference's cold open: a deep boom on the very first frame, before any music.
+  if (options.palette === "studio") addSfx("@boom", 0.05, 0.45);
   for (const g of graphics) {
-    for (const [name, off, vol] of GRAPHIC_SFX[g.look] || templateSfx(TEMPLATES[g.look], g)) addSfx(name, off < 0 ? g.start + g.duration + off : g.start + off, vol);
+    const hits = GRAPHIC_SFX[g.look] ? GRAPHIC_SFX[g.look].map(([name, off, vol]) => [name, off < 0 ? g.start + g.duration + off : g.start + off, vol]) : templateHits(g, TEMPLATES[g.look]);
+    for (const [name, at, vol] of hits) addSfx(name, at, vol);
     // A full-screen scene's transition gets its own sound, as in the Remotion cuts.
-    if (g.fullscreen) addSfx({ slide: "atlas-whoosh", wipe: "atlas-whoosh", circle: "atlas-impact", glitch: "atlas-click" }[g.transition] || "atlas-whoosh", Math.max(0, g.start - 0.1), g.transition === "circle" ? 0.6 : 0.4);
+    if (g.fullscreen) addSfx(SCENE_SOUND[g.transition] || "atlas-whoosh", Math.max(0, g.start - 0.1), g.transition === "circle" ? 0.6 : 0.4);
+    // The reference edit: a whip on the cut back out of a scene too, and the first scene is a big moment, so a riser
+    // swells into it and peaks right on the cut.
+    if (g.fullscreen && options.palette === "studio") {
+      addSfx("@cut", g.start + g.duration, 0.45);
+      if (g === graphics.find((x) => x.fullscreen) && g.start >= 1.8) addSfx("@riser", g.start, 0.45, { lead: Math.min(1.8, g.start - 0.3) });
+    }
     if (g.look === "list") {
-      // A soft tick as each item's check draws (timings shared with the animation in ads/graphics.js).
+      // A soft tick as each item's check draws (timings shared with the animation in motion/render.js).
       for (const at of listTimes(g.duration, Math.min(4, g.items.length))) addSfx("tick", g.start + at + 0.1, 0.4);
     }
     if (g.look === "stat" && parseStat(g.text)) {
@@ -847,7 +969,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
       for (let k = 0; k < 2; k++) addSfx("pop", g.start + 0.35 + k * gap, 0.45);
     }
     if (g.look === "logo" && g.strike) {
-      // Each logo whooshes in, then the X lands with a deep hit (timings match ads/graphics.js).
+      // Each logo whooshes in, then the X lands with a deep hit (timings match motion/render.js).
       g.logos.forEach((_, q) => addSfx("whoosh-short", g.start + q * 0.14, 0.35));
       const hit = Math.min(g.start + 0.55 + (g.logos.length - 1) * 0.14, Math.max(g.start + 0.35, g.start + g.duration - 0.87));
       // Every X lands with a crash; the first also gets a deep hit under it.

@@ -23,7 +23,7 @@ const AUDIO_RE = /\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff?)$/i;
 const BUSY = ["queued", "analyzing", "directing", "rendering"];
 
 // The shared sound library (lib/sounds.js, data/sounds/). Read straight from disk on every call: lib/sounds.js
-// caches its database per process, so writing through it from a second server would clobber HBA Content Backend's copy.
+// caches its database per process, so writing through it from a second server would clobber Ads Editor's copy.
 const SOUNDS_JSON = path.join(ROOT, "data", "sounds.json");
 const SOUNDS_DIR = path.join(ROOT, "data", "sounds");
 async function soundTracks() {
@@ -54,6 +54,8 @@ export function normalizeOptions(input = {}, { hasMusic = false, sources = [] } 
     accent: /^#?[0-9a-f]{6}$/i.test(String(input.accent || "")) ? String(input.accent).replace("#", "").toUpperCase() : null,
     captions: input.captions === true || input.captions === "true",
     sfx: pick(input.sfx, ["full", "subtle", "off"], "full"),
+    // Motion graphics from the Ads Editor's kit (edits/graphics.js), on unless turned off.
+    graphics: input.graphics !== false && input.graphics !== "false",
     ideaIds: Array.isArray(input.ideaIds) ? input.ideaIds.map(String).slice(0, 20) : [],
   };
 }
@@ -64,7 +66,7 @@ export function normalizeOptions(input = {}, { hasMusic = false, sources = [] } 
 const queue = [];
 const running = new Map(); // editId → { controller }
 let pumping = false;
-// false when a host (HBA Content Backend) renders plans itself: jobs stop once the plan is ready.
+// false when a host (Ads Editor) renders plans itself: jobs stop once the plan is ready.
 let defaultRender = true;
 
 /** Who asked for a job: method, URL, referring page and client, kept on the edit for tracing. */
@@ -122,7 +124,7 @@ async function gather(edit, { signal, set }) {
   const scanned = [];
   for (const [k, src] of edit.sources.entries()) {
     const file = sourcePath(edit, src);
-    // HBA Content Backend projects are analyzed once and shared by every edit that uses them (moment ids carry the letter).
+    // Ads Editor projects are analyzed once and shared by every edit that uses them (moment ids carry the letter).
     const workDir = src.projectId ? path.join(DATA_DIR, "analysis", `project-${src.projectId}`, src.letter) : path.join(dir, "analysis", src.letter);
     const a = await analyzeSource(file, workDir, {
       letter: src.letter,
@@ -186,6 +188,8 @@ async function work(edit, job) {
   signal.throwIfAborted();
   const options = normalizeOptions(edit.options, { hasMusic: Boolean(music), sources: analyzed });
   edit.options = options;
+  // Graphics are HTML (motion/render.js): only hosts that render plans with HyperFrames draw them, never the ffmpeg render.
+  const graphics = options.graphics && !job.render;
 
   let raw = edit.raw;
   if (redirect) {
@@ -197,7 +201,7 @@ async function work(edit, job) {
       sources: analyzed,
       music,
       starts,
-      options: { ...options, energy },
+      options: { ...options, energy, graphics },
       style: await styleGuidance(options.ideaIds),
       recipe,
       seed: `${edit.id}:${edit.versions.length}:${Date.now()}`,
@@ -216,7 +220,7 @@ async function work(edit, job) {
     musicStart: edit.musicStart ?? raw.musicStart,
   };
   const sources = Object.fromEntries(analyzed.map((a) => [a.letter, { file: a.file, duration: a.duration, hasAudio: a.hasAudio, fps: a.fps, words: a.words }]));
-  const plan = buildPlan(final, { sources, music, options });
+  const plan = buildPlan(final, { sources, music, options: { ...options, graphics } });
 
   const planVersion = (edit.planVersion || 0) + 1;
   const editPlan = toEditPlan(plan, { edit, raw, analyzed, planVersion });
@@ -279,13 +283,13 @@ function newEditRecord({ id, sources, music, input }) {
 
 async function projectSource(projectId, letter) {
   const p = await fs.readFile(path.join(PROJECTS_DIR, String(projectId), "project.json"), "utf8").then(JSON.parse, () => null);
-  if (!p?.source?.file) throw new Error(`HBA Content Backend project ${projectId} not found.`);
+  if (!p?.source?.file) throw new Error(`Ads Editor project ${projectId} not found.`);
   return { letter, name: p.name, file: path.join(PROJECTS_DIR, p.id, p.source.file), projectId: p.id, size: p.source.size };
 }
 
 /**
  * Start planning an edit (no rendering). Resolves right away with the queued edit; use waitForPlan() or poll.
- * @param projectIds  HBA Content Backend projects to use as sources (source video + transcript reused, nothing copied)
+ * @param projectIds  Ads Editor projects to use as sources (source video + transcript reused, nothing copied)
  * @param files       [{ path, name? }] other local videos (programmatic use only)
  * @param trackId     sound library track (data/sounds.json)
  * @param musicFile   { path, name? } a local song instead (programmatic use only)
@@ -339,7 +343,7 @@ export async function waitForPlan(editId, { timeoutMs = 15 * 60_000, signal } = 
 // ---------------------------------------------------------------------------
 // Integration surface
 
-/** Finished edits, newest first — for HBA Content Backend's scheduler library. */
+/** Finished edits, newest first — for Ads Editor's scheduler library. */
 export async function libraryItems() {
   const items = [];
   for (const edit of await listEdits()) {
@@ -396,7 +400,7 @@ const summary = (e) => ({
 });
 
 /**
- * @param sounds  optional { addTrack } from lib/sounds.js. Pass it when mounting inside HBA Content Backend's process so
+ * @param sounds  optional { addTrack } from lib/sounds.js. Pass it when mounting inside Ads Editor's process so
  *                songs uploaded here join the shared sound library; without it they stay with their edit.
  */
 export function createEditsIntegration({ sounds, render = true } = {}) {
@@ -522,7 +526,7 @@ export function createEditsIntegration({ sounds, render = true } = {}) {
     return edit.editPlan;
   }));
 
-  /** New plan for the same sources. keepShots: same shots, new finish (look, text, title, captions, SFX, music start). */
+  /** New plan for the same sources. keepShots: same shots, new finish (look, text, title, captions, SFX, graphics, music start). */
   router.post("/api/edits/:id/replan", withEdit((req, edit) => {
     const keepShots = Boolean(req.body.keepShots && edit.raw);
     edit.options = { ...edit.options, ...(req.body.options || {}) };
@@ -551,10 +555,10 @@ export function createEditsIntegration({ sounds, render = true } = {}) {
     return edit;
   }));
 
-  /** Same shots, new finish: look, text, title, captions, SFX, music start. */
+  /** Same shots, new finish: look, text, title, captions, SFX, graphics on/off, music start. */
   router.post("/api/edits/:id/rerender", withEdit((req, edit) => {
     if (!edit.raw) throw new Error("This edit hasn't been directed yet.");
-    const allowed = ["look", "lookIntensity", "textStyle", "accent", "title", "captions", "sfx", "aspect", "length"];
+    const allowed = ["look", "lookIntensity", "textStyle", "accent", "title", "captions", "sfx", "graphics", "aspect", "length"];
     for (const key of allowed) if (req.body.options?.[key] !== undefined) edit.options[key] = req.body.options[key];
     if (req.body.musicStart !== undefined) edit.musicStart = req.body.musicStart === null ? null : Number(req.body.musicStart);
     enqueue(edit, "rerender", { via: requestVia(req) });

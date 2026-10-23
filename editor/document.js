@@ -9,6 +9,7 @@ import { correctWords } from "../lib/corrections.js";
 import { readSilences } from "../lib/silence.js";
 import { getTrack } from "../lib/sounds.js";
 import { projectDir } from "../lib/store.js";
+import { CAMERA_MOVES, SCENE_TONES, TRANSITIONS } from "../motion/index.js";
 
 export const VERSION = 1;
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -101,14 +102,14 @@ export function normalizeDocument(input, { project, clip }) {
       if (c.link) base.link = id(c.link);
       if (kind === "text") return [{ ...base, content: str(c.content, 400), highlight: str(c.highlight, 60), style: c.style && typeof c.style === "object" ? JSON.parse(JSON.stringify(c.style).slice(0, 4000)) : {} }];
       if (kind === "emphasis") return [{ ...base, text: str(c.text, 80), why: str(c.why, 300) }];
-      // Ads Editor tracks (ads/graphics.js draws them): motion graphics and sound effects.
+      // Motion tracks (motion/render.js draws them): motion graphics and sound effects.
       if (kind === "graphic") {
         const items = (Array.isArray(c.items) ? c.items : []).slice(0, 8).map((x) => str(x, 140)).filter((x) => x.trim());
-        return [{ ...base, look: id(c.look) || "headline", highlight: str(c.highlight, 140), ...(c.fullscreen ? { fullscreen: true, tone: ["accent", "paper"].includes(c.tone) ? c.tone : "dark", ...(["fade", "slide", "wipe", "circle", "glitch"].includes(c.transition) ? { transition: c.transition } : {}) } : {}), ...(c.variant === "pill" ? { variant: "pill" } : {}), text: str(c.text, 120), sub: str(c.sub, 120), items, icon: id(c.icon) || "", ...(c.logo ? { logo: id(c.logo) } : {}), ...(Array.isArray(c.logos) ? { logos: c.logos.slice(0, 3).map(id).filter(Boolean) } : {}), ...(c.strike ? { strike: true } : {}), ...(c.slide ? { slide: id(c.slide) } : {}), ...(c.face && typeof c.face === "object" ? { face: { top: num(c.face.top, 0, 1), bottom: num(c.face.bottom, 0, 1) } } : {}), position: ["top", "center", "bottom"].includes(c.position) ? c.position : "top" }];
+        return [{ ...base, look: id(c.look) || "headline", highlight: str(c.highlight, 140), ...(c.fullscreen ? { fullscreen: true, tone: SCENE_TONES.includes(c.tone) ? c.tone : "dark", ...(TRANSITIONS.includes(c.transition) ? { transition: c.transition } : {}) } : {}), ...(c.variant === "pill" || c.variant === "studio" ? { variant: c.variant } : {}), text: str(c.text, 120), sub: str(c.sub, 120), items, icon: id(c.icon) || "", ...(c.logo ? { logo: id(c.logo) } : {}), ...(Array.isArray(c.logos) ? { logos: c.logos.slice(0, 3).map(id).filter(Boolean) } : {}), ...(c.strike ? { strike: true } : {}), ...(c.slide ? { slide: id(c.slide) } : {}), ...(c.face && typeof c.face === "object" ? { face: { top: num(c.face.top, 0, 1), bottom: num(c.face.bottom, 0, 1) } } : {}), position: ["top", "center", "bottom"].includes(c.position) ? c.position : "top" }];
       }
-      if (kind === "camera") return [{ ...base, move: ["punch", "push", "pull", "shake", "zoom-blur", "whip", "flash", "bw", "rgb"].includes(c.move) ? c.move : "punch" }];
+      if (kind === "camera") return [{ ...base, move: CAMERA_MOVES.includes(c.move) ? c.move : "punch" }];
       if (kind === "voicefx") return [{ ...base, effect: ["underwater", "muffle", "phone"].includes(c.effect) ? c.effect : "underwater" }];
-      if (kind === "sfx") return id(c.sfx) ? [{ ...base, sfx: id(c.sfx), volume: num(c.volume, 0, 2, 0.5), ...(Number(c.offset) > 0 ? { offset: num(c.offset, 0, 60) } : {}) }] : [];
+      if (kind === "sfx") return id(c.sfx) ? [{ ...base, sfx: id(c.sfx), volume: num(c.volume, 0, 2, 0.5), ...(Number(c.offset) > 0 ? { offset: num(c.offset, 0, 60) } : {}), ...(c.auto ? { auto: true } : {}) }] : [];
       if (kind === "overlay") {
         const source = ["slide", "screen", "broll"].includes(c.source) ? c.source : "slide";
         const o = { ...base, source, asset: id(c.asset), layout: LAYOUTS.includes(c.layout) ? c.layout : source === "broll" ? "full" : "split", side: c.side === "left" ? "left" : "right", name: str(c.name, 120), why: str(c.why, 300) };
@@ -118,7 +119,7 @@ export function normalizeDocument(input, { project, clip }) {
         return o.asset ? [o] : [];
       }
       if (kind === "caption") {
-        const words = (Array.isArray(c.words) ? c.words : []).slice(0, 60).map((w) => ({ text: str(w.text, 60), s: num(w.s, 0, 3600), e: num(w.e, 0, 3600) })).filter((w) => w.text.trim());
+        const words = (Array.isArray(c.words) ? c.words : []).slice(0, 60).map((w) => ({ text: str(w.text, 60), s: num(w.s, 0, 3600), e: num(w.e, 0, 3600), ...(["quote", "caps", "box"].includes(w.mark) ? { mark: w.mark } : {}) })).filter((w) => w.text.trim());
         return [{ ...base, words }];
       }
       const media = { ...base, sourceStart: num(c.sourceStart, 0, sourceDuration), speed: num(c.speed, 0.25, 4, 1), volume: num(c.volume, 0, 2, 1) };
@@ -169,7 +170,7 @@ export async function compositionInputs(doc, { project, clip, videoSrc }) {
   const words = visible(doc, (t) => t.kind === "caption")
     .flatMap((t) => t.clips)
     .sort(byStart)
-    .flatMap((c) => c.words.map((w) => ({ text: w.text, s: r3(c.start + w.s), e: r3(Math.min(c.start + c.duration, c.start + w.e)) })))
+    .flatMap((c) => c.words.map((w) => ({ text: w.text, s: r3(c.start + w.s), e: r3(Math.min(c.start + c.duration, c.start + w.e)), ...(w.mark ? { mark: w.mark } : {}) })))
     .filter((w) => w.s < Math.min(D, 3600));
 
   const title = visible(doc, (t) => t.kind === "text").flatMap((t) => t.clips).sort(byStart)[0];
@@ -223,7 +224,7 @@ export function documentPlan(doc) {
   const duration = documentDuration(doc);
   const words = shown((t) => t.kind === "caption")
     .sort(byStart)
-    .flatMap((c) => c.words.map((w) => ({ text: w.text, s: r3(c.start + w.s), e: r3(Math.min(c.start + c.duration, c.start + w.e)) })))
+    .flatMap((c) => c.words.map((w) => ({ text: w.text, s: r3(c.start + w.s), e: r3(Math.min(c.start + c.duration, c.start + w.e)), ...(w.mark ? { mark: w.mark } : {}) })))
     .filter((w) => w.s < duration);
   const title = shown((t) => t.kind === "text").sort(byStart)[0] || null;
   const musicTrack = doc.tracks.find((t) => t.kind === "audio" && t.role === "music");

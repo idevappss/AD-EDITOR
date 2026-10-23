@@ -1,6 +1,6 @@
-// Dev server for the Thumbnails tab (port 5196). Serves HBA Content Backend's page from disk with the Thumbnails nav
+// Dev server for the Thumbnails tab (port 5196). Serves Ads Editor's page from disk with the Thumbnails nav
 // link and route patched in (the same hooks ENGINE adds for real, see thumbnails/README.md), mounts this
-// router, and proxies everything else to the running HBA Content Backend server on 5173, which it never restarts.
+// router, and proxies everything else to the running Ads Editor server on 5173, which it never restarts.
 //   node thumbnails/dev.js   → http://localhost:5196/#/thumbnails
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -64,7 +64,7 @@ app.use(async (req, res) => {
     if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
     else res.end();
   } catch (err) {
-    res.status(502).type("text").send(`HBA Content Backend isn't reachable at ${UPSTREAM}: ${err.message}`);
+    res.status(502).type("text").send(`Ads Editor isn't reachable at ${UPSTREAM}: ${err.message}`);
   }
 });
 

@@ -1,5 +1,5 @@
-// Dev server for the Clipping tab (port 5199). Serves HBA Content Backend's page from disk, mounts this router
-// with the code on disk, and proxies everything else to the running HBA Content Backend server on 5173, which it
+// Dev server for the Clipping tab (port 5199). Serves Ads Editor's page from disk, mounts this router
+// with the code on disk, and proxies everything else to the running Ads Editor server on 5173, which it
 // never restarts. Its watcher is off (only the real server runs clipping.start()), and renders it queues run in this process, so use it to work on the page, not to clip for real.
 //   node clipping/dev.js   → http://localhost:5199/#/clipping
 import path from "node:path";
@@ -39,7 +39,7 @@ app.use(async (req, res) => {
     if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
     else res.end();
   } catch (err) {
-    res.status(502).type("text").send(`HBA Content Backend isn't reachable at ${UPSTREAM}: ${err.message}`);
+    res.status(502).type("text").send(`Ads Editor isn't reachable at ${UPSTREAM}: ${err.message}`);
   }
 });
 

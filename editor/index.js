@@ -20,6 +20,7 @@ import { injectLayers } from "./director/layers.js";
 import { attachMattes, ensureMattes, matteUrl, mattesDir } from "./director/matte.js";
 import { applyCues, planDirector } from "./director/plan.js";
 import { applyAdLayers } from "../ads/layers.js";
+import { LOOKS as KIT_LOOKS, SFX as KIT_SFX, kitCatalog, soundClips, templateHits } from "../motion/index.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ID = /^[\w-]{1,60}$/;
@@ -69,7 +70,28 @@ function clipContext(project, clip) {
     styles: Object.entries(STYLES).map(([id, s]) => ({ id, label: s.label, description: s.description, design: s.design })),
     fonts: Object.fromEntries(Object.entries(FONTS).map(([id, f]) => [id, f.label])),
     media: { videoSrc: videoUrl(project), peakRate: PEAK_RATE },
+    kit: kit(),
   };
+}
+
+/**
+ * The motion kit for the pickers (the creator, 2026-09-30: every motion graphic, effect and sound in the clip editor
+ * too): every look, the kit templates with their notes, starter content and sounds, and every sound effect.
+ */
+let kitCache = null;
+function kit() {
+  if (kitCache) return kitCache;
+  // Each template's sounds placed by the house rules (motion/sounds.js), relative to the graphic's start: worked out on a
+  // graphic at 10 s so a build-up that starts before the graphic keeps its lead-in (the picker clamps it at 0 s).
+  const BASE = 10;
+  const sounds = (t) => soundClips(templateHits({ ...t.sample, look: t.id, start: BASE, duration: t.duration }))
+    .map(({ sfx, start, volume, offset }) => ({ sfx, at: Math.round((start - BASE) * 1000) / 1000, volume, ...(offset ? { offset } : {}) }));
+  kitCache = {
+    looks: KIT_LOOKS,
+    templates: kitCatalog().map((t) => ({ ...t, sounds: sounds(t) })),
+    sounds: KIT_SFX,
+  };
+  return kitCache;
 }
 
 /** Public view of an upload for the media panel. */
@@ -304,11 +326,11 @@ export function createEditor({ loadProject = loadFromStore } = {}) {
     const doc = await openDoc(project, clip);
     const base = req.body?.document && Array.isArray(req.body.document.tracks) ? normalizeDocument(req.body.document, { project, clip }) : doc;
     // Big captions unless turned off; slides and phone demos only when asked for.
-    const want = { slides: req.body?.want?.slides === true, screens: req.body?.want?.screens === true, emphasis: req.body?.want?.emphasis !== false };
+    const want = { slides: req.body?.want?.slides === true, screens: req.body?.want?.screens === true, emphasis: req.body?.want?.emphasis !== false, graphics: req.body?.want?.graphics !== false };
     const plan = await planDirector(base, { projectId: project.id, want, note: String(req.body?.note || "").slice(0, 600) });
     const assets = await listAssets(project.id);
     const next = applyCues(structuredClone(base), plan.cues, assets);
-    return { mode: plan.mode, concept: plan.concept, notice: plan.notice || null, cues: plan.cues.length, tracks: next.tracks.filter((t) => t.kind === "overlay" || t.kind === "emphasis") };
+    return { mode: plan.mode, concept: plan.concept, notice: plan.notice || null, cues: plan.cues.length, tracks: next.tracks.filter((t) => ["overlay", "emphasis", "graphic", "sfx"].includes(t.kind)) };
   }));
 
   // Cutouts behind emphasis captions: starts any that are missing and reports progress per clip.

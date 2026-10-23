@@ -11,6 +11,10 @@ import { describeClaudeError, hasClaudeKey } from "../../lib/analyze.js";
 import { FFMPEG, ROOT, run } from "../../lib/tools.js";
 import { documentDuration } from "../document.js";
 import { assetBriefs } from "./assets.js";
+import { CLIP_TEMPLATES, SCENE_SOUND, SCENE_TONES, SCENE_TRANSITIONS, TEMPLATES, isScene, soundClips, templateCatalog, templateHits } from "../../motion/index.js";
+
+// The motion kit (motion/) for regular clips (the creator, 2026-09-30): CLIP_TEMPLATES is every template but the Ads
+// Editor's offer closes (the trial / call CTAs sell Atlas; a clip's own CTA is a follow or a comment).
 
 const MODEL = "claude-opus-5";
 const STYLE_FILE = path.join(ROOT, "shared", "EDITOR_STYLE.md");
@@ -23,7 +27,7 @@ const CueSchema = z.object({
   concept: z.string().describe("One sentence: the editing idea for this video."),
   cues: z.array(
     z.object({
-      type: z.enum(["slide", "screen", "broll", "emphasis"]),
+      type: z.enum(["slide", "screen", "broll", "emphasis", "graphic"]),
       start: z.number().describe("Seconds on the edit timeline"),
       end: z.number(),
       asset: z.string().optional().describe("Asset id (slide / screen / broll)"),
@@ -32,7 +36,14 @@ const CueSchema = z.object({
       side: z.enum(["left", "right"]).optional().describe("Which side the slide / phone goes on"),
       sourceStart: z.number().optional().describe("screen / broll: second of the recording to start from"),
       focus: Box.optional(),
-      text: z.string().optional().describe("emphasis: the 2–6 words shown big, exactly as spoken (fix capitalization only)"),
+      text: z.string().optional().describe("emphasis: the 2–6 words shown big, exactly as spoken (fix capitalization only). graphic: the template's text field"),
+      template: z.enum(CLIP_TEMPLATES).optional().describe("graphic: the motion-kit template id"),
+      sub: z.string().optional().describe("graphic: the template's sub field"),
+      highlight: z.string().optional().describe("graphic: the template's highlight field"),
+      items: z.array(z.string()).optional().describe("graphic: the template's items, exactly as its fields say"),
+      fullscreen: z.boolean().optional().describe("graphic: a full-screen scene that cuts away from the speaker (templates that can or always are full-screen)"),
+      tone: z.enum(SCENE_TONES).optional().describe("graphic scenes: the ground"),
+      transition: z.enum(SCENE_TRANSITIONS).optional().describe("graphic scenes: how the scene comes in"),
       why: z.string(),
     }),
   ),
@@ -45,6 +56,8 @@ You decide, from what is said and exactly when:
 - screen: when the speaker shows or describes something on their phone or an app ("let me show you", "on my phone", "this app", "here's the dashboard"), the speaker is pushed to one side and the screen recording plays on the other. Pick sourceStart so the relevant part of the recording plays.
 - broll: a landscape recording that illustrates what's said, shown full frame for a few seconds.
 - emphasis: the handful of lines that are the point of a section (a number, an outcome, a hard truth). They appear as huge glowing words behind the speaker. Scarce: roughly one per 20–30 seconds at most, never during a slide or screen cue, 2–6 words, the speaker's exact words.
+
+- graphic: a motion graphic from the motion kit (the template library below) on the line it illustrates: a number that moves, the one-liner said as a pair, a list of what you get, a before → after, the thing it does. Fill the template's fields exactly as its notes say, in the speaker's own meaning (never invent claims or numbers they didn't say). Minimal, premium, one idea per graphic: roughly one per 12–20 seconds, 2–5 s each (long enough to read at about 3 words a second), never over a slide, screen, B-roll or big caption, never two at once, never in the first 1.5 seconds. Full-screen scenes (fullscreen = true) at most one per 30 seconds and at most 3.5 s. One word may be written *like this* for an italic serif accent.
 
 Rules:
 - Only use assets and pages that exist. Never invent content.
@@ -113,6 +126,7 @@ async function askClaude({ assets, lines, D, want, note, projectId }) {
   const content = [];
   const text = (t) => content.push({ type: "text", text: t });
 
+  if (want.graphics) text(`<template_library>\nMotion-kit templates for graphic cues (id (job, full-screen ability): when to use. Fields):\n${templateCatalog().split("\n").filter((l) => CLIP_TEMPLATES.some((id) => l.startsWith(`- ${id} (`))).join("\n")}\n</template_library>`);
   text(`Edit length: ${D.toFixed(1)} s.\nWanted: ${Object.entries(want).filter(([, v]) => v).map(([k]) => k).join(", ") || "nothing"}.${note ? `\nCreator's note: ${note}` : ""}\n\nTranscript on the edit timeline:\n${lines.join("\n")}`);
   let images = 0;
   for (const a of assets) {
@@ -196,8 +210,19 @@ export function applyCues(doc, cues, assets) {
   const videos = doc.tracks.filter((t) => t.kind === "video").flatMap((t) => t.clips);
   const overlays = [];
   const emphasis = [];
+  const graphics = [];
+  const sounds = [];
   let n = 0;
   for (const c of cues) {
+    if (c.type === "graphic") {
+      // The graphic and its own sounds (as the Ads Editor adds them), marked as the director's so a rerun replaces them.
+      const g = { id: `g${++n}`, type: "graphic", start: c.start, duration: r2(c.end - c.start), look: c.template, position: TEMPLATES[c.template].position || "center", text: c.text || "", sub: c.sub || "", highlight: c.highlight || "", items: c.items || [], why: c.why, ...(c.fullscreen ? { fullscreen: true, tone: c.tone || "dark", transition: c.transition || "fade" } : {}) };
+      graphics.push(g);
+      // Peak-aligned and mixed by the house rules (motion/sounds.js), with a full-screen scene's entrance sound.
+      const hits = [...templateHits(g), ...(isScene(TEMPLATES[g.look], g) ? [[SCENE_SOUND[g.transition] || "atlas-whoosh", Math.max(0, g.start - 0.1), g.transition === "circle" ? 0.6 : 0.4]] : [])];
+      for (const s of soundClips(hits)) sounds.push({ id: `sd${++n}`, ...s, auto: true });
+      continue;
+    }
     const base = { id: `${c.type === "emphasis" ? "e" : "o"}${++n}`, start: c.start, duration: r2(c.end - c.start), why: c.why };
     if (c.type === "emphasis") {
       const piece = videos.find((v) => c.start >= v.start - 1e-3 && c.start < v.start + v.duration);
@@ -208,12 +233,16 @@ export function applyCues(doc, cues, assets) {
       overlays.push({ ...base, type: "overlay", source: c.type, asset: c.asset, name: names.get(c.asset) || "", layout: c.layout, side: c.side, ...(c.type === "slide" ? { page: c.page, ...(c.focus ? { focus: c.focus } : {}) } : { sourceStart: c.sourceStart || 0 }) });
     }
   }
-  const keep = doc.tracks.filter((t) => t.kind !== "overlay" && t.kind !== "emphasis");
+  const keep = doc.tracks.filter((t) => t.kind !== "overlay" && t.kind !== "emphasis" && t.kind !== "graphic" && t.kind !== "sfx");
   const prior = (kind) => doc.tracks.find((t) => t.kind === kind);
+  // Sound effects the creator added by hand stay; the director's own (auto) are replaced.
+  const handSfx = (prior("sfx")?.clips || []).filter((c) => !c.auto);
   doc.tracks = [
+    ...(graphics.length || prior("graphic") ? [{ id: "graphics", kind: "graphic", name: "Motion graphics", hidden: prior("graphic")?.hidden || false, locked: false, clips: graphics }] : []),
     { id: "overlays", kind: "overlay", name: "Overlays", hidden: prior("overlay")?.hidden || false, locked: false, clips: overlays },
     { id: "emphasis", kind: "emphasis", name: "Big captions", hidden: prior("emphasis")?.hidden || false, locked: false, clips: emphasis },
     ...keep,
+    ...(sounds.length || handSfx.length ? [{ id: "sfx", kind: "sfx", name: "Sound FX", hidden: false, locked: false, muted: prior("sfx")?.muted || false, clips: [...handSfx, ...sounds].sort((a, b) => a.start - b.start) }] : []),
   ];
   return doc;
 }
@@ -228,6 +257,16 @@ export function validateCues(cues, { assets, words, D, want }) {
     let start = r2(clamp(c.start, 0, D));
     let end = r2(clamp(c.end, 0, D));
     if (end - start < 0.8) continue;
+    if (c.type === "graphic") {
+      const t = TEMPLATES[c.template];
+      if (!want.graphics || !t || !CLIP_TEMPLATES.includes(c.template) || start < 1.5) continue;
+      if (!String(c.text || "").trim() && !(c.items || []).some((x) => String(x || "").trim())) continue;
+      const full = t.scene === "always" || (t.scene === "optional" && c.fullscreen === true);
+      end = Math.min(end, start + (full ? 3.5 : 6));
+      if (end - start < Math.max(1.2, t.minLen || 1.2)) end = Math.min(D, start + Math.max(1.2, t.minLen || 1.2));
+      out.push({ type: "graphic", template: t.id, start, end: r2(end), text: String(c.text || "").slice(0, 140), sub: String(c.sub || "").slice(0, 140), highlight: String(c.highlight || "").slice(0, 140), items: (c.items || []).map((x) => String(x).slice(0, 140)).slice(0, 8), fullscreen: full, tone: c.tone, transition: c.transition, why: c.why || "" });
+      continue;
+    }
     if (c.type === "emphasis") {
       if (!want.emphasis || !c.text?.trim()) continue;
       end = Math.min(end, start + 4.5);
@@ -259,9 +298,22 @@ export function validateCues(cues, { assets, words, D, want }) {
     panels.push(cue);
     out.push(cue);
   }
-  // Emphasis never sits on top of a panel, and stays scarce: at least 12 seconds between two of them.
+  // Emphasis never sits on top of a panel, and stays scarce: at least 12 seconds between two of them. Graphics sit on
+  // plain speaker only (no panel, no big caption), never two at once, 8 s apart, full-screen ones 25 s apart.
   let lastEmphasis = -Infinity;
+  const emph = out.filter((c) => c.type === "emphasis");
+  let lastGraphic = null;
+  let lastScene = -Infinity;
   return out
+    .filter((c) => {
+      if (c.type !== "graphic") return true;
+      if (panels.some((p) => c.start < p.end + 0.3 && c.end > p.start - 0.3) || emph.some((p) => c.start < p.end && c.end > p.start)) return false;
+      if (lastGraphic && c.start < Math.max(lastGraphic.end + 0.3, lastGraphic.start + 8)) return false;
+      if (c.fullscreen && c.start - lastScene < 25) return false;
+      if (c.fullscreen) lastScene = c.start;
+      lastGraphic = c;
+      return true;
+    })
     .filter((c) => c.type !== "emphasis" || !panels.some((p) => c.start < p.end && c.end > p.start))
     .sort((a, b) => a.start - b.start)
     .filter((c) => {

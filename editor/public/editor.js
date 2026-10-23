@@ -280,12 +280,14 @@ export async function mountEditor(root, { projectId, clipId }) {
         await store.flush();
         const plan = await api(`${base}/director`, { method: "POST", body: { document: store.doc, want, note } });
         store.commit("AI edit", (doc) => {
-          const keep = doc.tracks.filter((t) => t.kind !== "overlay" && t.kind !== "emphasis");
-          doc.tracks = [...plan.tracks, ...keep];
+          // The director's tracks replace their own kinds; its motion graphics go on top and sound effects last.
+          const kinds = new Set(plan.tracks.map((t) => t.kind));
+          const keep = doc.tracks.filter((t) => !kinds.has(t.kind) && t.kind !== "overlay" && t.kind !== "emphasis");
+          doc.tracks = [...plan.tracks.filter((t) => t.kind !== "sfx"), ...keep, ...plan.tracks.filter((t) => t.kind === "sfx")];
         });
-        const count = plan.tracks.reduce((n, t) => n + t.clips.length, 0);
-        ctx.director = { state: "done", message: `${plan.concept || ""}${plan.notice ? ` ${plan.notice}` : ""} ${count ? `${count} overlay${count === 1 ? "" : "s"} added to the timeline. Undo removes them.` : "Nothing matched well enough to add."}`.trim() };
-        toast(count ? `AI edit: ${count} overlay${count === 1 ? "" : "s"} on the timeline` : "The director didn't find anything to add");
+        const count = plan.tracks.filter((t) => t.kind !== "sfx").reduce((n, t) => n + t.clips.length, 0);
+        ctx.director = { state: "done", message: `${plan.concept || ""}${plan.notice ? ` ${plan.notice}` : ""} ${count ? `${count} piece${count === 1 ? "" : "s"} added to the timeline. Undo removes them.` : "Nothing matched well enough to add."}`.trim() };
+        toast(count ? `AI edit: ${count} piece${count === 1 ? "" : "s"} on the timeline` : "The director didn't find anything to add");
         watchMattes();
       } catch (err) {
         ctx.director = { state: "error", message: err.message };
@@ -308,6 +310,43 @@ export async function mountEditor(root, { projectId, clipId }) {
       if (id) store.select([id]);
       else toast("There's already an overlay at the playhead. Move the playhead to a free spot.");
     },
+    // The motion kit (motion/ via ctx.context.kit): a graphic at the playhead with its starter words and its
+    // own sounds on the Sound FX track, already placed and mixed by the server (motion/sounds.js).
+    addGraphic(look) {
+      const t = (ctx.context.kit?.templates || []).find((x) => x.id === look);
+      if (!t) return;
+      let id = null;
+      store.commit(`add ${t.name}`, (doc) => {
+        const track = ensureTrack(doc, "graphic");
+        if (track.locked) return false;
+        const clip = { id: M.newId(doc, "g"), type: "graphic", start: r3(store.time), duration: r3(t.duration), look: t.id, position: t.position || "center", text: t.sample.text || "", sub: t.sample.sub || "", highlight: t.sample.highlight || "", items: [...(t.sample.items || [])], ...(t.scene !== "none" ? { fullscreen: t.scene === "always", tone: "dark", transition: "fade" } : {}) };
+        if (!M.place(doc, track, clip, store.time)) return false;
+        id = clip.id;
+        const sfx = ensureTrack(doc, "sfx");
+        for (const s of t.sounds || []) {
+          if (!ctx.context.kit.sounds[s.sfx]) continue;
+          // A build-up that would start before 0 s starts into its file instead.
+          const at = clip.start + s.at;
+          const offset = (s.offset || 0) + Math.max(0, -at);
+          sfx.clips.push({ id: M.newId(doc, "s"), type: "sfx", start: r3(Math.max(0, at)), duration: 2, sfx: s.sfx, volume: s.volume, ...(offset > 0 ? { offset: r3(offset) } : {}) });
+        }
+        sfx.clips.sort((a, b) => a.start - b.start);
+      });
+      if (id) store.select([id]);
+      else toast("There's already a motion graphic at the playhead. Move the playhead to a free spot.");
+    },
+    addSfx(name) {
+      let id = null;
+      store.commit("add sound effect", (doc) => {
+        const track = ensureTrack(doc, "sfx");
+        if (track.locked) return false;
+        const clip = { id: M.newId(doc, "s"), type: "sfx", start: r3(store.time), duration: 2, sfx: name, volume: 0.5 };
+        track.clips.push(clip);
+        track.clips.sort((a, b) => a.start - b.start);
+        id = clip.id;
+      });
+      if (id) store.select([id]);
+    },
     addEmphasis() {
       let id = null;
       store.commit("add big caption", (doc) => {
@@ -326,6 +365,13 @@ export async function mountEditor(root, { projectId, clipId }) {
 
   function ensureTrack(doc, kind) {
     let track = doc.tracks.find((t) => t.kind === kind);
+    if (!track && (kind === "graphic" || kind === "sfx")) {
+      // Same ids and names as the Ads Editor's tracks (ads/build.js): graphics on top, sound effects under the audio.
+      track = kind === "graphic" ? { id: "graphics", kind, name: "Motion graphics", hidden: false, locked: false, clips: [] } : { id: "sfx", kind, name: "Sound FX", hidden: false, locked: false, clips: [] };
+      if (kind === "graphic") doc.tracks.unshift(track);
+      else doc.tracks.push(track);
+      return track;
+    }
     if (!track) {
       track = kind === "overlay" ? { id: "overlays", kind, name: "Overlays", hidden: false, locked: false, clips: [] } : { id: "emphasis", kind, name: "Big captions", hidden: false, locked: false, clips: [] };
       const at = kind === "overlay" ? 0 : doc.tracks.findIndex((t) => t.kind === "overlay") + 1;

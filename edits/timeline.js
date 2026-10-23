@@ -1,8 +1,10 @@
 // Fits a director's shot list onto the music's beat grid and turns it into an exact, frame-quantized
-// render plan: slot times, transition overlaps, source windows, speed parts, text, captions and SFX cues.
+// render plan: slot times, transition overlaps, source windows, speed parts, text, captions and SFX cues, plus the
+// director's motion graphics from the Ads Editor's kit (edits/graphics.js) with their sounds.
 import { beatGrid } from "./beats.js";
 import { EFFECTS, LOOKS, SPEEDS, TEXT_STYLES, TRANSITIONS } from "./looks.js";
 import { FPS, sourceSpan, speedParts } from "./render.js";
+import { placeGraphics } from "./graphics.js";
 
 export const ASPECTS = {
   "9:16": { width: 1080, height: 1920, label: "9:16 · Reels / TikTok / Shorts" },
@@ -23,10 +25,10 @@ const SFX = {
 };
 
 /**
- * @param raw      director plan: { title, look, lookIntensity, textStyle, accent, musicStart, shots: [...] }
+ * @param raw      director plan: { title, look, lookIntensity, textStyle, accent, musicStart, shots: [...], graphics?: [...] }
  * @param sources  { A: { file, duration, hasAudio, fps, words? }, ... }
  * @param music    beat analysis + { file } or null
- * @param options  { length, aspect, audioMode, captions, sfx, lut }
+ * @param options  { length, aspect, audioMode, captions, sfx, lut, graphics }
  */
 export function buildPlan(raw, { sources, music, options }) {
   const { width, height } = ASPECTS[options.aspect] || ASPECTS["9:16"];
@@ -40,7 +42,7 @@ export function buildPlan(raw, { sources, music, options }) {
   // 1. Slots on the grid.
   const slots = [];
   let g = 0; // grid index of the current cut
-  for (const s of raw.shots) {
+  for (const [rawIndex, s] of raw.shots.entries()) {
     const src = sources[s.source];
     if (!src) continue;
     const t0 = grid[g];
@@ -55,7 +57,7 @@ export function buildPlan(raw, { sources, music, options }) {
     }
     // Don't overshoot the target by more than half a beat.
     while (beats > 1 && grid[g + beats] > target + beatSec * 0.5) beats--;
-    slots.push({ s, src, dialogue, start: q(t0), end: q(grid[g + beats]) });
+    slots.push({ s, rawIndex, src, dialogue, start: q(t0), end: q(grid[g + beats]) });
     g += beats;
   }
   if (!slots.length) throw new Error("The plan didn't contain any usable shots.");
@@ -173,6 +175,17 @@ export function buildPlan(raw, { sources, music, options }) {
     sfx.splice(48);
   }
 
+  // 7. Motion graphics (the director anchors each on one of its shots), drawn by motion/render.js with their own
+  // sounds; a text slam under one of them gives way.
+  const byRaw = new Map(slots.map((slot, i) => [slot.rawIndex, shots[i]]));
+  const kit = options.graphics === false || !raw.graphics?.length
+    ? { graphics: [], sfx: [] }
+    : placeGraphics(raw.graphics, { shotAt: (i) => byRaw.get(i), length, titleEnd: title ? texts[0].end : 0, captions, sfxLevel: level });
+  if (kit.graphics.length) {
+    const covered = (t) => kit.graphics.some((c) => t.start < c.start + c.duration && t.end > c.start);
+    for (let i = texts.length - 1; i >= (title ? 1 : 0); i--) if (covered(texts[i])) texts.splice(i, 1);
+  }
+
   // Beat markers on the edit timeline (beats past the song's end are extrapolated from its tempo).
   const onTimeline = (times) => times.map((t) => r3(t - musicStart)).filter((t) => t >= -0.001 && t <= length);
   const markers = {
@@ -201,5 +214,9 @@ export function buildPlan(raw, { sources, music, options }) {
     texts,
     captions,
     sfx,
+    // Ads-editor clips (motion/render.js): { id, type: "graphic", start, duration, look, text, sub, highlight, items,
+    // position, fullscreen?, tone?, transition? } and { id, type: "sfx", start, duration, sfx, volume, offset? }.
+    graphics: kit.graphics,
+    graphicSfx: kit.sfx,
   };
 }

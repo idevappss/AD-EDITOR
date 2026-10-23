@@ -2,6 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "atlas-ad-editor",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Desktop/AI Softwares/ADS EDITOR/server.js"
+      ],
+      "port": 5200
+    },
+    {
       "name": "clip-studio",
       "runtimeExecutable": "node",
       "runtimeArgs": [
@@ -80,6 +88,14 @@
         "/Users/wfp/Documents/CLAUDE/HBA CLIPS/thumbnails/dev.js"
       ],
       "port": 5196
+    },
+    {
+      "name": "ire",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/wfp/Documents/CLAUDE/HBA CLIPS/ire/dev.js"
+      ],
+      "port": 5189
     }
   ]
 }

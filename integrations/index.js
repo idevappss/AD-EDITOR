@@ -1,5 +1,6 @@
 // Integrations & API keys: one page for the services this app connects to, starting with Claude (is the key
-// working, and roughly how many credits are left). Instagram keeps its own connect page in instagram/.
+// working, and roughly how many credits are left) and Higgsfield (is the key working; nothing in the app uses it
+// yet). Instagram keeps its own connect page in instagram/.
 // Wiring and endpoints: integrations/README.md
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,7 @@ export function createIntegrations({ dataDir, env = process.env, fetch = (...arg
   const ledger = createClaudeLedger({ file: path.join(dataDir, "claude.json"), now });
   const stop = trackClaudeResponses((event) => ledger.record(event));
   let lastKeyCheck = null; // { key, at, result }
+  let lastHiggsfieldCheck = null; // { key, at, result }
 
   /** Does Anthropic accept the key in .env? Listing models is free, so checking costs no credits. */
   async function claudeKey() {
@@ -38,11 +40,42 @@ export function createIntegrations({ dataDir, env = process.env, fetch = (...arg
     return lastKeyCheck.result;
   }
 
+  /**
+   * Does Higgsfield accept the key ID + secret in .env? It has no free "who am I" endpoint, so this asks for the
+   * status of a request that doesn't exist: bad credentials get 401 before the lookup, good ones get "not found".
+   */
+  async function higgsfieldKey() {
+    const id = env.HIGGSFIELD_API_KEY;
+    const secret = env.HIGGSFIELD_API_SECRET;
+    if (!id || !secret) return { state: id || secret ? "incomplete" : "missing" };
+    const key = `${id}:${secret}`;
+    if (lastHiggsfieldCheck?.key === key) {
+      const settled = ["valid", "rejected"].includes(lastHiggsfieldCheck.result.state);
+      if (now() - lastHiggsfieldCheck.at < (settled ? KEY_RECHECK_MS : KEY_RETRY_MS)) return lastHiggsfieldCheck.result;
+    }
+    let state;
+    try {
+      const res = await fetch("https://api.higgsfield.ai/requests/00000000-0000-0000-0000-000000000000/status", {
+        headers: { Authorization: `Key ${key}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      state = res.status === 401 || res.status === 403 ? "rejected" : res.ok || res.status === 404 || res.status === 422 ? "valid" : "unknown";
+    } catch {
+      state = "unreachable";
+    }
+    lastHiggsfieldCheck = { key, at: now(), result: { state, hint: `…${id.slice(-4)}` } };
+    return lastHiggsfieldCheck.result;
+  }
+
   const router = express.Router();
   router.get("/", (_req, res) => res.sendFile(path.join(PUBLIC, "index.html")));
   router.use("/ui", express.static(PUBLIC));
   router.get("/status", async (_req, res) => {
-    res.json({ claude: { key: await claudeKey(), credits: await ledger.summary(), billingUrl: BILLING_URL, pricesChecked: PRICES_CHECKED } });
+    const [claude, higgsfield] = await Promise.all([claudeKey(), higgsfieldKey()]);
+    res.json({
+      claude: { key: claude, credits: await ledger.summary(), billingUrl: BILLING_URL, pricesChecked: PRICES_CHECKED },
+      higgsfield: { key: higgsfield, keysUrl: "https://cloud.higgsfield.ai" },
+    });
   });
   router.post("/claude/balance", express.json(), async (req, res) => {
     try {
