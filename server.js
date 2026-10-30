@@ -1604,6 +1604,9 @@ for (const project of await listProjects()) {
   // Older projects get their working copy and subject tracking in the background.
   if (project.status === "ready") warmProject(project);
 }
+// …ads' videos too (listProjects leaves them out): a working copy made with an older voice cleanup gets its sound
+// redone, so a new cleanup (2026-10-30, the noise removal) reaches the ads before they're saved again.
+for (const project of await listProjects({ ads: true })) if (project.status === "ready" && isAdProject(project)) warmProject(project);
 
 // Check for posts whose time has come.
 setInterval(() => tick().catch((err) => console.error("Scheduler tick failed:", err)), 15_000);

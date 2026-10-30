@@ -7,7 +7,9 @@ import { ASPECTS, groupCaptions, houseLevel, normalizeDesign } from "../lib/comp
 import { clipMusic, planClip } from "../lib/clipplan.js";
 import { correctWords } from "../lib/corrections.js";
 import { readSilences } from "../lib/silence.js";
-import { getTrack } from "../lib/sounds.js";
+import { songLoudness } from "../lib/bed.js";
+import { AD_BED_LUFS } from "../lib/media.js";
+import { SOUNDS_DIR, getTrack } from "../lib/sounds.js";
 import { projectDir } from "../lib/store.js";
 import { CAMERA_MOVES, SCENE_TONES, TRANSITIONS } from "../motion/index.js";
 
@@ -185,6 +187,10 @@ export async function compositionInputs(doc, { project, clip, videoSrc }) {
   const musicTrack = visible(doc, (t) => t.kind === "audio" && t.role === "music" && !t.muted)[0];
   const bed = musicTrack?.clips.find((c) => c.sound);
   const sound = bed ? await getTrack(bed.sound) : null;
+  // Ads play the song matched to their bed's loudness, as the render mixes it (lib/media.js AD_BED_LUFS), so the
+  // preview's 11% sounds like the finished ad's.
+  const songLufs = sound && clip?.id === "ad" ? await songLoudness(path.join(SOUNDS_DIR, sound.file)) : null;
+  const match = songLufs != null ? 10 ** ((AD_BED_LUFS - songLufs) / 20) : 1;
   const voiceTrack = doc.tracks.find((t) => t.kind === "audio" && t.role === "voice");
 
   return {
@@ -193,7 +199,7 @@ export async function compositionInputs(doc, { project, clip, videoSrc }) {
     design,
     parts,
     timeline: { duration: D, parts, words },
-    music: sound ? { src: `/sounds-media/${encodeURIComponent(sound.file)}`, duration: sound.duration, volume: houseLevel(bed.volume) } : null,
+    music: sound ? { src: `/sounds-media/${encodeURIComponent(sound.file)}`, duration: sound.duration, volume: Math.round(houseLevel(bed.volume) * match * 1000) / 1000 } : null,
     muteVoice: !voiceTrack || voiceTrack.muted || voiceTrack.hidden,
   };
 }

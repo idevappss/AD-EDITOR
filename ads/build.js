@@ -55,6 +55,8 @@ export const AD_MUSIC_LEVEL = 0.11;
 export const AD_MUSIC_MIN = 0.1;
 export const AD_SFX_LEVEL = 0.1;
 export const AD_SFX_MIN = 0.09;
+/** What an effect at 100% peaks at once matched (ads/layers.js sfxGains): 10% lands near -24 LUFS, ~12 dB under the voice. */
+export const AD_SFX_LUFS = -2;
 
 export const PALETTES = {
   classic: {},

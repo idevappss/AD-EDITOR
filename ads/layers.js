@@ -7,6 +7,7 @@ import path from "node:path";
 import { ROOT } from "../lib/tools.js";
 import { listLuts } from "../lib/luts.js";
 import { graphicClips, injectAdLayers, sfxClips, sfxFile } from "../motion/index.js";
+import { AD_SFX_LUFS } from "./build.js";
 import { DATA_DIR, adFor } from "./store.js";
 import { fxFile, splitVoice } from "./voicefx.js";
 
@@ -45,6 +46,16 @@ export async function brandAccent() {
   }
   accentCache = { at: Date.now(), hex: hex || "#F4930F" };
   return accentCache.hex;
+}
+
+/**
+ * Each effect matched to the house effect loudness (AD_SFX_LUFS, its loudest 400 ms): a gain on the clip's volume, so
+ * the creator's 10% is the same level for a soft whip and a loud boom, about 12 dB under the voice. Played at raw file
+ * level, 10% left the effects 20–36 dB under it and none could be heard (2026-10-30). Unmeasured effects play as is.
+ */
+async function sfxGains() {
+  const measured = await fs.readFile(path.join(DATA_DIR, "sfx-loudness.json"), "utf8").then((t) => JSON.parse(t), () => ({}));
+  return (name) => (Number.isFinite(measured[name]?.lufs) ? 10 ** ((AD_SFX_LUFS - measured[name].lufs) / 20) : 1);
 }
 
 /**
@@ -87,5 +98,5 @@ export async function applyAdLayers(html, doc, { projectId, preview = true, stag
       return preview ? `/api/ads/voicefx/${path.basename(file)}` : stage(file, `ads/voicefx/${path.basename(file)}`);
     });
   }
-  return injectAdLayers(html, doc, { sfxSrc, slideSrc, logoSrc, grade: ad?.grade || null, accent: ad?.options?.accent || (await brandAccent()) });
+  return injectAdLayers(html, doc, { sfxSrc, sfxGain: await sfxGains(), slideSrc, logoSrc, grade: ad?.grade || null, accent: ad?.options?.accent || (await brandAccent()) });
 }

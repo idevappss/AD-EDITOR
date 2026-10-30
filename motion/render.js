@@ -140,7 +140,7 @@ const icon = (name, size, stroke = 2.2) => `<svg class="ag-ic" width="${size}" h
  * @param opts.grade   a GRADES id, or null to leave the composition's own grade alone
  * @param opts.accent  the brand accent (defaults to the design's accent)
  */
-export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoSrc = () => null, grade = null, accent: brandAccent = null } = {}) {
+export function injectAdLayers(html, doc, { sfxSrc, sfxGain = () => 1, slideSrc = () => null, logoSrc = () => null, grade = null, accent: brandAccent = null } = {}) {
   let out = html;
   if (grade && GRADES[grade]) {
     const g = GRADES[grade].grade;
@@ -290,7 +290,9 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
     .map((c, i) => {
       const src = sfxSrc?.(c.sfx);
       if (!src) return "";
-      const vol = Math.max(0, Math.min(1.6, c.volume ?? 0.5)) * 0.8;
+      // The clip's volume (the timeline's %) on the effect matched to the house effect loudness (sfxGain), so every
+      // effect at 10% sounds about the same.
+      const vol = Math.max(0, Math.min(2, (c.volume ?? 0.5) * sfxGain(c.sfx))) * 0.8;
       return `<audio id="ag-sfx-${esc(c.id)}" src="${esc(src)}" data-start="${r3(c.start)}" data-duration="${r3(c.duration)}" data-media-start="${r3(c.offset || 0)}" data-track-index="${30 + (i % 16)}" data-volume="${r3(vol)}"></audio>`;
     })
     .filter(Boolean);
