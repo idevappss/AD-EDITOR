@@ -13,7 +13,7 @@ import { formatMoney } from "../lib/money.js";
 import { tightenClip } from "../lib/tighten.js";
 import { editStyleOf } from "./styles.js";
 import { DATA_DIR as EDITOR_DIR } from "../editor/media.js";
-import { AMBIENT_SFX, BANNED_SFX, BED_LEVEL, CTA_CLICK, GRADES, LOOKS, PEAK, ROLE_LEVEL, SCENE_SOUND, SFX, SFX_GAIN, SFX_ROLE, TEMPLATES, TRANSITIONS, libraryOf, listTimes, parseStat, statCount, templateHits } from "../motion/index.js";
+import { BANNED_SFX, CTA_CLICK, GRADES, LOOKS, PEAK, SCENE_SOUND, SFX, SFX_ROLE, TEMPLATES, TRANSITIONS, libraryOf, listTimes, parseStat, statCount, templateHits } from "../motion/index.js";
 
 export const AD_CLIP = "ad";
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -46,34 +46,15 @@ const HIT_SFX = {
 export const BANNED_VOICEFX = new Set(["underwater", "muffle", "phone"]);
 
 /**
- * Ad mix levels (the creator, 2026-09-28: "turn down the music a tiny bit and the sound effects a bit more").
- * The music bed sits at 0.112 (the house bed is 0.13, about 1.3 dB quieter); every sound effect is scaled by 0.7.
+ * Ad mix levels, as the timeline shows them (the creator, 2026-10-29): the music "at 11%, if that's too loud put it at
+ * 10%", and every sound effect "around the same… 9–10%". Every palette, every ad: no per-sound loudness caps any more
+ * (they let a boom through at 88% and a whip at 134%). Music tracks are loudness-matched on import (lib/media.js), so
+ * 11% is the same loudness under every song. ads/review.js holds each ad to these before it's handed over.
  */
-export const AD_MUSIC_LEVEL = 0.112;
-export const AD_SFX_GAIN = SFX_GAIN;
-
-/**
- * The loudness guard (the creator, 2026-09-28: "the swoosh sounds are too loud… make sure the background noises are not
- * louder than the music"). Every sound effect's volume is capped from its file's measured loudness (its loudest
- * 400 ms, LUFS), so what it adds to the mix is known, not guessed:
- *   - whooshes, swooshes, air and risers never play louder than the music bed;
- *   - everything else (clicks, pops, dings, hits) stays at least 12 dB under the voice.
- * Levels measured going into the mix: the cleaned voice ~-12.5 LUFS, the bed ~-13.5 LUFS scaled by its level (-32.5
- * at 0.112). The renderer plays effects at 0.8 of their clip volume (motion/render.js).
- */
-const VOICE_LUFS = -12.5;
-const MUSIC_LUFS = -13.5 + 20 * Math.log10(AD_MUSIC_LEVEL);
-/**
- * The studio palette's music bed: 14 dB under the voice, as in the reference edit the creator called perfect
- * (motion/references/sound-study.md, 2026-10-23), about 6 dB up on the house ad bed.
- */
-export const STUDIO_MUSIC_LEVEL = Math.round(10 ** ((VOICE_LUFS + BED_LEVEL + 13.5) / 20) * 1000) / 1000;
-export function sfxCap(name, loudness) {
-  if (!Number.isFinite(loudness)) return Infinity;
-  // The pack sounds play at their role's level from the reference (cuts, clicks, risers, booms); the rest as before.
-  const target = SFX_ROLE[name] ? VOICE_LUFS + ROLE_LEVEL[SFX_ROLE[name]] : AMBIENT_SFX.has(name) ? MUSIC_LUFS : VOICE_LUFS - 12;
-  return 10 ** ((target - loudness) / 20) / 0.8;
-}
+export const AD_MUSIC_LEVEL = 0.11;
+export const AD_MUSIC_MIN = 0.1;
+export const AD_SFX_LEVEL = 0.1;
+export const AD_SFX_MIN = 0.09;
 
 export const PALETTES = {
   classic: {},
@@ -107,6 +88,63 @@ const GRAPHIC_SFX = {
   icon: [["ping", 0.1, 0.35]],
   cta: [["air", 0.1, 0.3], ["click", CTA_CLICK, 0.8]],
 };
+
+/**
+ * Fewer effects (the creator, 2026-10-28: "try not to use soooooo many sound effects, only when it makes the most
+ * sense"). The sounds that carry the ad win: the opening boom and other big hits, the risers into scenes, a number's
+ * landing, the whips on scene cuts; small clicks and ticks only stay where nothing else is near. No two moments within
+ * 1.5 s (a riser and the whip on the cut it peaks into are one moment), booms at least 8 s apart, two risers at most,
+ * and about one moment per 4.5 s at most.
+ */
+const SOUND_RANK = { boom: 5, riser: 4, land: 3, cut: 2, ui: 1 };
+const HOUSE_RANK = {
+  "impact-bass-1": 5, "impact-bass-2": 5, boom: 5, "atlas-impact": 5, crash: 5,
+  riser: 4, "atlas-riser": 4, "whoosh-cinematic": 4, revswell: 4,
+  cash: 3, bell: 3, "atlas-ding": 3, "atlas-success": 3, chirp: 3,
+  whoosh: 2, "whoosh-short": 2, swoosh: 2, bigswoosh: 2, "atlas-whoosh": 2, slice: 2, click: 2,
+};
+export function thinSounds(sounds, D) {
+  const rank = (s) => SOUND_RANK[SFX_ROLE[s.sfx]] ?? HOUSE_RANK[s.sfx] ?? 1;
+  const at = (s) => s.start + (PEAK[s.sfx] ?? 0) - (s.offset || 0);
+  const pair = (a, b) => Math.abs(at(a) - at(b)) < 0.35 && [a, b].some((x) => rank(x) === 4) && [a, b].some((x) => rank(x) === 2);
+  // About one moment every 7 s (every 4.5 s until 2026-10-29, when the creator still heard "way too much sound effects").
+  const max = Math.max(3, Math.round(D / 7));
+  const kept = [];
+  let moments = 0;
+  for (const s of [...sounds].sort((a, b) => rank(b) - rank(a) || at(a) - at(b))) {
+    const partner = kept.some((k) => pair(k, s));
+    if (!partner && moments >= max) continue;
+    // At least 3 s between moments (1.5 s until 2026-10-29: four whips in four seconds still read as too much).
+    if (kept.some((k) => Math.abs(at(k) - at(s)) < 3 && !pair(k, s))) continue;
+    // Big hits stay rare: at least 8 s between booms, and two risers in an ad at most.
+    if (rank(s) === 5 && kept.some((k) => rank(k) === 5 && Math.abs(at(k) - at(s)) < 8)) continue;
+    if (rank(s) === 4 && kept.filter((k) => rank(k) === 4).length >= 2) continue;
+    kept.push(s);
+    if (!partner) moments++;
+  }
+  sounds.splice(0, sounds.length, ...kept);
+}
+
+/**
+ * An ad's sound brought to the house mix as it stands now: effects thinned (thinSounds) and each one at the effects'
+ * level, the music bed at the music's (AD_SFX_LEVEL, AD_MUSIC_LEVEL). Nothing is added or moved, so the creator's own
+ * sound choices in a hand-edited ad stay theirs, just at the house levels and fewer (2026-10-29: "you used way too
+ * much sound effects… I'm not sure if you had the volume down on the sound effects & on the music").
+ */
+export function remixSounds(doc) {
+  const D = Math.max(0, ...doc.tracks.filter((t) => t.kind === "video").flatMap((t) => t.clips).map((c) => c.start + c.duration));
+  const sfx = doc.tracks.find((t) => t.kind === "sfx");
+  const before = sfx?.clips.length || 0;
+  if (sfx) {
+    thinSounds(sfx.clips, D);
+    for (const c of sfx.clips) c.volume = AD_SFX_LEVEL;
+    sfx.clips.sort((a, b) => a.start - b.start);
+  }
+  const bed = AD_MUSIC_LEVEL;
+  for (const t of doc.tracks.filter((t) => t.kind === "audio" && t.id === "music")) for (const c of t.clips) c.volume = bed;
+  if (doc.design) doc.design.musicLevel = bed;
+  return { before, after: sfx?.clips.length || 0, music: bed };
+}
 
 /** A testimonial moment: the member's line and name from data/ads/testimonials.json. */
 function proofGraphic(g, testimonials = []) {
@@ -347,6 +385,37 @@ export function dropRestarts(words) {
     }
   }
   return out;
+}
+
+const bare = (w) => String(w?.text || "").toLowerCase().replace(/[^a-z0-9']/g, "");
+
+/**
+ * Never half a sentence (the creator, 2026-10-28: the plan kept "…does everything for me so that" and dropped "I only
+ * have to worry about creating the content, helping the people inside my offers."). A kept range that stops mid-clause
+ * runs on to the end of its sentence, unless it's spliced onto a restart (the next kept range starts on or just after
+ * the word it stops on said again: "This has | …tangent… this has | taken everything off my plate"), the rest is played
+ * elsewhere in the plan, sounds like a retake (it repeats three words in a row that the ad already says), or isn't one
+ * short continuous stretch of speech (a long pause or more than 7 s).
+ */
+export function finishSentences(keep, words) {
+  const n = words.length;
+  const kept = new Set();
+  for (const k of keep || []) for (let i = Math.max(0, Math.min(k.from, k.to)); i <= Math.min(n - 1, Math.max(k.from, k.to)); i++) kept.add(i);
+  const trigrams = new Set([...kept].sort((a, b) => a - b).map((i) => [i, i + 1, i + 2].map((j) => bare(words[j])).join(" ")));
+  return (keep || []).map((k, j, all) => {
+    const to = Math.max(k.from, k.to);
+    if (to >= n - 1 || /[.?!,;:—-]$/.test(String(words[to].text))) return k;
+    const next = all[j + 1] ? Math.min(all[j + 1].from, all[j + 1].to) : -1;
+    if (next > to && words.slice(Math.max(0, next - 3), next + 3).some((w) => bare(w) === bare(words[to]))) return k;
+    let end = to + 1;
+    while (end < n - 1 && !/[.?!]$/.test(String(words[end].text))) end++;
+    const rest = words.slice(to + 1, end + 1);
+    if (!/[.?!]$/.test(String(words[end].text)) || rest.length > 25 || words[end].end - words[to].end > 7) return k;
+    if (rest.some((w, i) => w.start - (i ? rest[i - 1] : words[to]).end > 1.2)) return k;
+    for (let i = to + 1; i <= end; i++) if (kept.has(i)) return k;
+    for (let i = to + 1; i + 2 <= end; i++) if (trigrams.has([i, i + 1, i + 2].map((j) => bare(words[j])).join(" "))) return k;
+    return { ...k, to: end };
+  });
 }
 
 /** Kept word ranges → source time ranges, in play order, with neighbours in the source merged. */
@@ -599,6 +668,64 @@ export function endOnVoice(pieces, levels) {
 }
 
 /**
+ * The planner's graphic moments, as looks the renderer draws (anything it can't draw, or with nothing to show, is
+ * dropped). The planner returns logo moments ({ logos[], strike }); anything else (older plans) needs its words.
+ */
+export function plannedLooks(list, options) {
+  return list
+    .map((g) => (g.kind === "number" ? { ...g, look: "stat", position: "center" } : g.kind === "checklist" ? { ...g, look: "list", position: "bottom" } : g.kind === "cta" ? { ...g, look: "cta", position: "bottom", text: g.text || options.ctaText || "Start free trial" } : g.kind === "proof" ? proofGraphic(g, options.testimonials) : g.kind === "check" ? { ...g, look: "check", position: "center" } : g.kind === "template" && TEMPLATES[g.template] ? { ...g, look: g.template, position: TEMPLATES[g.template].position } : g.kind === "slide" && (options.slides || []).some((x) => x.id === g.slide) ? { ...g, look: "slide", position: "top", text: g.text || " " } : g))
+    .map((g) => (g.kind === "logos" && Array.isArray(g.logos) ? { ...g, look: "logo", logos: g.logos.filter((id) => (options.logos || []).some((l) => l.id === id)).slice(0, 3) } : g))
+    .filter((g) => LOOKS[g.look] && (g.look === "logo" ? g.logos?.length : g.look === "list" ? (g.items || []).filter(Boolean).length >= 2 : TEMPLATES[g.look] ? String(g.text || "").trim() || (g.items || []).some((x) => String(x || "").trim()) : String(g.text || "").trim()));
+}
+
+/**
+ * Timeline graphic clips from planned looks with their times ({ g, t0, t1 }, sorted): never two at once, at least
+ * 1.2 s each, long enough to read, held a beat past the line.
+ */
+export function placeGraphics(planned, D, options) {
+  const graphics = [];
+  for (const [i, { g, t0, t1: end }] of planned.entries()) {
+    const next = planned[i + 1];
+    let t1 = Math.max(end, t0 + (g.look === "list" ? 1.2 + (g.items?.length || 1) * 0.7 : g.look === "cta" ? 2.6 : g.look === "proof" || g.look === "slide" ? 3.2 : TEMPLATES[g.look]?.minLen || 1.8));
+    // Long enough to read (motion-graphics-director: ~3 words a second on screen, plus the entrance), up to 5 s.
+    t1 = Math.max(t1, t0 + Math.min(5, 0.6 + readWords(g) / 3));
+    t1 = Math.min(t1, t0 + (g.look === "cta" ? 9 : 7), D, next ? next.t0 - 0.12 : D);
+    const prev = graphics.at(-1);
+    if (prev && t0 < prev.start + prev.duration) {
+      if (t0 - 0.1 - prev.start >= 1.0 || g.look === "cta") prev.duration = r3(Math.max(0.6, t0 - 0.1 - prev.start));
+      else continue;
+      if (prev.duration < 0.8) graphics.pop();
+    }
+    if (t1 - t0 < 1.2) continue;
+    // Style rotation for the built-in looks (a different number card or CTA from the last ad).
+    const variant = g.look !== "stat" ? {} : options.palette === "studio" ? { variant: "studio" } : options.variants?.stat === "pill" ? { variant: "pill" } : {};
+    const look = g.look === "cta" && options.variants?.cta === "sonar" ? "sonar-cta" : g.look;
+    graphics.push({
+      ...variant,
+      id: `g${graphics.length + 1}`,
+      type: "graphic",
+      start: r3(t0),
+      duration: r3(t1 - t0),
+      look,
+      text: String(g.text || "").trim().slice(0, 120),
+      ...(g.look === "logo" ? { logos: g.logos, ...(g.strike ? { strike: true } : {}) } : {}),
+      ...(g.look === "slide" ? { slide: g.slide } : {}),
+      ...(TEMPLATES[g.look] && g.logos?.length ? { logos: g.logos.slice(0, 3) } : {}),
+      // The hero logo carries its name underneath (the brand as uploaded), unless the plan wrote one.
+      ...(g.look === "logo" && !g.strike && !String(g.text || "").trim() ? { text: ((options.logos || []).find((l) => l.id === g.logos[0])?.name || "").toUpperCase() } : {}),
+      sub: String(g.sub || "").trim().slice(0, 120),
+      highlight: String(g.highlight || "").trim().slice(0, 140),
+      items: (g.items || []).map((x) => String(x).trim().slice(0, 140)).filter(Boolean).slice(0, 8),
+      icon: g.icon || "",
+      // Kit templates can cut away to a full-screen scene (the dark or accent ground) while the voice carries on.
+      ...(TEMPLATES[look]?.scene && (g.fullscreen || TEMPLATES[look].scene === "always") ? { fullscreen: true, tone: ["accent", "paper"].includes(g.tone) ? g.tone : "dark", ...(TRANSITIONS.includes(g.transition) ? { transition: g.transition } : {}) } : {}),
+      position: g.look === "logo" ? "top" : g.position,
+    });
+  }
+  return graphics;
+}
+
+/**
  * Build the editor document for an ad.
  * @returns { doc, duration, stats }
  */
@@ -610,6 +737,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const simple = Boolean(editStyleOf(options)?.simple);
   if (simple) plan = { ...plan, graphics: [], sfx: [], voice_fx: [], emphasis: [], auto_numbers: false, camera: (plan.camera || []).filter((m) => m.move === "punch") };
   const n = words.length;
+  plan = { ...plan, keep: finishSentences(plan.keep, words) };
   const ranges = keepRanges(plan, words, levels);
   // Long-video word timings drift by up to a second; each kept take re-transcribed on its own is exact. Its words
   // replace the take's words, for the captions and for where the cuts land.
@@ -628,6 +756,11 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const after = lastIn ? words.find((w) => w.start > lastIn.start + 0.01 && !inside.includes(w)) : null;
     const wall = after ? after.start - 0.03 : Infinity;
     if (tail + 0.12 > r.end) r.end = r3(Math.max(r.end > wall ? wall : r.end, Math.min(tail + 0.12, r.end + 0.4, wall, nextStart > r.start ? Math.max(r.end, nextStart - 0.02) : Infinity)));
+  }
+  // …and never past the words heard either side of the take (realignTakes): those belong to other lines.
+  for (const r of ranges) {
+    if (r.wall > r.start + 0.2) r.end = r3(Math.min(r.end, r.wall));
+    if (r.floor < r.end - 0.2) r.start = r3(Math.max(r.start, r.floor));
   }
   // Widened takes must never overlap (that plays a word twice): takes that run on in the footage merge into one,
   // and a take that starts inside the one before it starts where that one ends.
@@ -707,7 +840,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     // The reference reel's captions (lib/facezone.js, the creator 2026-10-22): a word or two, lowercase, bold tight
     // Helvetica about 94 px tall on 1080, centered on the chest line. motion/render.js moves one off the face.
     captionY: tall ? CAPTION_LINE : 86,
-    captionScale: 0.8,
+    captionScale: editStyleOf(options)?.captionScale ?? 0.8,
     maxWords: 2,
     lowercase: true,
     tracking: -3,
@@ -718,9 +851,9 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     motion: "none",
     zoom: false,
     autoFrame: true,
-    framing: simple ? "key" : "rhythm",
+    framing: editStyleOf(options)?.framing ?? (simple ? "key" : "rhythm"),
     musicBed: options.music === true && plan.music !== false ? "auto" : "none",
-    musicLevel: options.palette === "studio" ? STUDIO_MUSIC_LEVEL : AD_MUSIC_LEVEL,
+    musicLevel: AD_MUSIC_LEVEL,
     grade: grade === "none" ? "none" : "clean",
     lut: options.lut || "none",
     ...(options.accent ? { accentColor: options.accent } : {}),
@@ -741,52 +874,10 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const captions = captionClips(tight.words, D, design);
 
   // Motion graphics: never two at once, at least 1.2s each, held a beat past the line.
-  const graphics = [];
-  const planned = (plan.graphics || [])
-    // The planner returns logo moments ({ logos[], strike }); anything else (older plans) needs its words.
-    .map((g) => (g.kind === "number" ? { ...g, look: "stat", position: "center" } : g.kind === "checklist" ? { ...g, look: "list", position: "bottom" } : g.kind === "cta" ? { ...g, look: "cta", position: "bottom", text: g.text || options.ctaText || "Start free trial" } : g.kind === "proof" ? proofGraphic(g, options.testimonials) : g.kind === "check" ? { ...g, look: "check", position: "center" } : g.kind === "template" && TEMPLATES[g.template] ? { ...g, look: g.template, position: TEMPLATES[g.template].position } : g.kind === "slide" && (options.slides || []).some((x) => x.id === g.slide) ? { ...g, look: "slide", position: "top", text: g.text || " " } : g))
-    .map((g) => (g.kind === "logos" && Array.isArray(g.logos) ? { ...g, look: "logo", logos: g.logos.filter((id) => (options.logos || []).some((l) => l.id === id)).slice(0, 3) } : g))
-    .filter((g) => LOOKS[g.look] && (g.look === "logo" ? g.logos?.length : g.look === "list" ? (g.items || []).filter(Boolean).length >= 2 : TEMPLATES[g.look] ? String(g.text || "").trim() || (g.items || []).some((x) => String(x || "").trim()) : String(g.text || "").trim()))
+  const planned = plannedLooks(plan.graphics || [], options)
     .map((g) => ({ g, t0: Math.max(0, wordAt(g.at) - 0.1), t1: Math.min(D, wordEnd(Math.max(g.at, g.until)) + 0.35) }))
     .sort((a, b) => a.t0 - b.t0);
-  for (const [i, { g, t0, t1: end }] of planned.entries()) {
-    const next = planned[i + 1];
-    let t1 = Math.max(end, t0 + (g.look === "list" ? 1.2 + (g.items?.length || 1) * 0.7 : g.look === "cta" ? 2.6 : g.look === "proof" || g.look === "slide" ? 3.2 : TEMPLATES[g.look]?.minLen || 1.8));
-    // Long enough to read (motion-graphics-director: ~3 words a second on screen, plus the entrance), up to 5 s.
-    t1 = Math.max(t1, t0 + Math.min(5, 0.6 + readWords(g) / 3));
-    t1 = Math.min(t1, t0 + (g.look === "cta" ? 9 : 7), D, next ? next.t0 - 0.12 : D);
-    const prev = graphics.at(-1);
-    if (prev && t0 < prev.start + prev.duration) {
-      if (t0 - 0.1 - prev.start >= 1.0 || g.look === "cta") prev.duration = r3(Math.max(0.6, t0 - 0.1 - prev.start));
-      else continue;
-      if (prev.duration < 0.8) graphics.pop();
-    }
-    if (t1 - t0 < 1.2) continue;
-    // Style rotation for the built-in looks (a different number card or CTA from the last ad).
-    const variant = g.look !== "stat" ? {} : options.palette === "studio" ? { variant: "studio" } : options.variants?.stat === "pill" ? { variant: "pill" } : {};
-    const look = g.look === "cta" && options.variants?.cta === "sonar" ? "sonar-cta" : g.look;
-    graphics.push({
-      ...variant,
-      id: `g${graphics.length + 1}`,
-      type: "graphic",
-      start: r3(t0),
-      duration: r3(t1 - t0),
-      look,
-      text: String(g.text || "").trim().slice(0, 120),
-      ...(g.look === "logo" ? { logos: g.logos, ...(g.strike ? { strike: true } : {}) } : {}),
-      ...(g.look === "slide" ? { slide: g.slide } : {}),
-      ...(TEMPLATES[g.look] && g.logos?.length ? { logos: g.logos.slice(0, 3) } : {}),
-      // The hero logo carries its name underneath (the brand as uploaded), unless the plan wrote one.
-      ...(g.look === "logo" && !g.strike && !String(g.text || "").trim() ? { text: ((options.logos || []).find((l) => l.id === g.logos[0])?.name || "").toUpperCase() } : {}),
-      sub: String(g.sub || "").trim().slice(0, 120),
-      highlight: String(g.highlight || "").trim().slice(0, 140),
-      items: (g.items || []).map((x) => String(x).trim().slice(0, 140)).filter(Boolean).slice(0, 8),
-      icon: g.icon || "",
-      // Kit templates can cut away to a full-screen scene (the dark or accent ground) while the voice carries on.
-      ...(TEMPLATES[look]?.scene && (g.fullscreen || TEMPLATES[look].scene === "always") ? { fullscreen: true, tone: ["accent", "paper"].includes(g.tone) ? g.tone : "dark", ...(TRANSITIONS.includes(g.transition) ? { transition: g.transition } : {}) } : {}),
-      position: g.look === "logo" ? "top" : g.position,
-    });
-  }
+  const graphics = placeGraphics(planned, D, options);
   // Number moments are never optional (the creator's call): any money figure, "24/7" or "N days free" said in the
   // cut that has no graphic on it gets its counter card, even when the plan left it out.
   const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fourteen: 14, thirty: 30 };
@@ -841,8 +932,12 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const busy = (t0, t1) => graphics.some((g) => t0 < g.start + g.duration && t1 > g.start);
 
   // Intentional camera moves (punch in / slow push / pull out), never under a graphic: motion/render.js frames them.
+  // Premium's cinematic framing (ads/styles.js) only keeps clear of full-screen scenes: in the creator's reference reels
+  // the shot punches in with a count-up or a big word up beside the speaker (2026-10-28), and a busy Premium ad has a
+  // graphic up most of the time, which used to drop every planned punch-in.
+  const cinematic = editStyleOf(options)?.framing === "cinematic";
   const camera = [];
-  const clash = (t0, t1) => graphics.some((g) => t0 < g.start + g.duration && t1 > g.start - 0.1) || camera.some((c) => t0 < c.start + c.duration && t1 > c.start);
+  const clash = (t0, t1) => graphics.some((g) => (!cinematic || g.fullscreen) && t0 < g.start + g.duration && t1 > g.start - 0.1) || camera.some((c) => t0 < c.start + c.duration && t1 > c.start);
   // Cut hits (FastFX / CapCut-style): short effects on the footage, each with its sound. Transitions sit on the cut.
   const cuts = parts.slice(1).map((p) => p.t);
   // Where the sentence being said at t gives way to the next one: just before the first word after its full stop (or
@@ -861,6 +956,8 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
       if (simple) t1 = r3(Math.min(D, t0 + 8, Math.max(t1, sentenceChange(wordEnd(Math.max(m.at, m.until ?? m.at))))));
       if (t1 - t0 < 0.5) continue;
     } else if (HIT_LEN[m.move]) {
+      // Premium: no shakes, flashes, glitches or black-and-white beats on the speaker, only the soft blur.
+      if (cinematic && m.move !== "blur") continue;
       const cut = nearCut(t0);
       if (["whip", "flash"].includes(m.move) && Math.abs(cut - t0) < 0.6) t0 = r3(Math.max(0, cut - (m.move === "whip" ? 0.12 : 0.05)));
       t1 = m.move === "bw" ? r3(Math.min(D, t0 + 1.5, Math.max(t0 + 0.6, wordEnd(Math.max(m.at, m.until ?? m.at)) + 0.1))) : r3(Math.min(D, t0 + HIT_LEN[m.move]));
@@ -911,7 +1008,6 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   const addSfx = (name, t, volume, extra = {}) => {
     if (name in swap) name = swap[name];
     // A role from the studio palette: the next of that role's pack sounds, so repeats rotate. Booms twice at most.
-    let shade = null;
     if (String(name).startsWith("@")) {
       const role = name.slice(1), list = libraryOf(role);
       if (role === "boom" && sounds.filter((s) => SFX_ROLE[s.sfx] === "boom").length >= 2) return;
@@ -919,13 +1015,10 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
       // One sound per moment, as in the reference: nothing of the same role within 0.35 s of another.
       if (sounds.some((s) => SFX_ROLE[s.sfx] === role && Math.abs(s.start + (PEAK[s.sfx] ?? 0) - (s.offset || 0) - t) < 0.35)) return;
       name = list.length ? list[(turns[role] = (turns[role] ?? -1) + 1) % list.length] : null;
-      // The role's level is the point; the hit's own volume only shades it (a soft hit plays a little under).
-      shade = Math.min(1, Math.max(0.6, volume / 0.45));
       // A riser stops dead on the cut it peaks into, as in the reference.
       if (role === "riser" && name) extra = { ...extra, duration: Math.min(extra.lead ?? PEAK[name] ?? 1, PEAK[name] ?? 1) + 0.08 };
     }
     if (!name || !SFX[name] || options.sfx === false || avoid.has(name) || BANNED_SFX.has(name)) return;
-    volume *= level;
     // Quiet: only the sounds that carry a moment (hits on logos/X, pops, clicks, cha-ching), no build-ups.
     if (level < 1 && ["riser", "whoosh-cinematic", "whoosh", "glitch-1", "glitch-2"].includes(name)) return;
     const peak = PEAK[name] ?? 0;
@@ -936,20 +1029,26 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
     const start = r3(Math.max(0, t));
     if (start >= D || sounds.some((s) => s.sfx === name && Math.abs(s.start - start) < 0.15)) return;
     const len = Math.max(0.2, Math.min(extra.duration, 3.5, D - start));
-    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: r3(shade != null && Number.isFinite(sfxCap(name, options.sfxLoudness?.(name))) ? sfxCap(name, options.sfxLoudness?.(name)) * shade * (options.sfxLevel ?? 1) : Math.min(volume * AD_SFX_GAIN * (options.sfxLevel ?? 1), sfxCap(name, options.sfxLoudness?.(name)))), ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
+    sounds.push({ id: `s${sounds.length + 1}`, type: "sfx", start, duration: r3(len), sfx: name, volume: AD_SFX_LEVEL, ...(extra.offset > 0 ? { offset: extra.offset } : {}) });
   };
   // The reference's cold open: a deep boom on the very first frame, before any music.
   if (options.palette === "studio") addSfx("@boom", 0.05, 0.45);
+  let lastRiser = -Infinity;
   for (const g of graphics) {
     const hits = GRAPHIC_SFX[g.look] ? GRAPHIC_SFX[g.look].map(([name, off, vol]) => [name, off < 0 ? g.start + g.duration + off : g.start + off, vol]) : templateHits(g, TEMPLATES[g.look]);
     for (const [name, at, vol] of hits) addSfx(name, at, vol);
     // A full-screen scene's transition gets its own sound, as in the Remotion cuts.
     if (g.fullscreen) addSfx(SCENE_SOUND[g.transition] || "atlas-whoosh", Math.max(0, g.start - 0.1), g.transition === "circle" ? 0.6 : 0.4);
     // The reference edit: a whip on the cut back out of a scene too, and the first scene is a big moment, so a riser
-    // swells into it and peaks right on the cut.
+    // swells into it and peaks right on the cut. Premium (ads/styles.js buildUps) builds into every scene that way,
+    // at least 6 s apart so it never drones.
     if (g.fullscreen && options.palette === "studio") {
       addSfx("@cut", g.start + g.duration, 0.45);
-      if (g === graphics.find((x) => x.fullscreen) && g.start >= 1.8) addSfx("@riser", g.start, 0.45, { lead: Math.min(1.8, g.start - 0.3) });
+      const first = g === graphics.find((x) => x.fullscreen);
+      if (g.start >= 1.8 && (first || (editStyleOf(options)?.buildUps && g.start - lastRiser >= 6))) {
+        addSfx("@riser", g.start, 0.45, { lead: Math.min(1.8, g.start - 0.3) });
+        lastRiser = g.start;
+      }
     }
     if (g.look === "list") {
       // A soft tick as each item's check draws (timings shared with the animation in motion/render.js).
@@ -990,6 +1089,7 @@ export async function buildAdDocument({ project, plan, words, aspect, options = 
   for (const c of camera) for (const [name, off, vol] of HIT_SFX[c.move] || []) addSfx(name, c.start + off, vol);
   for (const v of voicefx) if (v.effect === "underwater") addSfx("boom", v.start, 0.5);
   for (const s of plan.sfx || []) addSfx(s.sound, wordAt(s.at), 0.45);
+  thinSounds(sounds, D);
   sounds.sort((a, b) => a.start - b.start);
   sounds.forEach((s, i) => (s.id = `s${i + 1}`));
 

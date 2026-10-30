@@ -22,18 +22,20 @@ import { transcribe } from "../lib/transcribe.js";
 import { trackerBinary } from "../lib/subject.js";
 import { loadProject, projectDir, saveProject } from "../lib/store.js";
 import { workingFile } from "../lib/work.js";
-import { clipFocus, finishedRender, isRendering, queueRender, cancelRender } from "../lib/pipeline.js";
+import { clipFocus, finishedRender, isRendering, processingStalled, queueRender, cancelRender } from "../lib/pipeline.js";
 import { projectWords } from "../editor/document.js";
 import { applyCaptionFixes, captionFixes, dropBaseline, handEdits, readBaseline, saveBaseline, videoSignature } from "./learn.js";
 import { ensureMattes } from "../editor/director/matte.js";
 import { DATA_DIR as EDITOR_DIR } from "../editor/media.js";
 import { sourceLevels } from "./levels.js";
-import { AD_CLIP, HISTORY_DIR, PALETTES, buildAdDocument, captionClips, readAdDocument, studioReady, writeAdDocument } from "./build.js";
+import { AD_CLIP, HISTORY_DIR, PALETTES, buildAdDocument, captionClips, placeGraphics, plannedLooks, readAdDocument, studioReady, writeAdDocument } from "./build.js";
+import { reviewAd, reviewSound } from "./review.js";
 import { GRADES, LOOKS, SFX, TEMPLATES, sfxFile } from "../motion/index.js";
 import { LOGOS_DIR, PREVIEWS_DIR, gradedPreviewName } from "./layers.js";
 import { DATA_DIR, findAd, load, newId, persist, readSettings, update, writeSettings } from "./store.js";
 import { DIRECTIONS, OFFERS, hasClaudeKey, offerCtaStyles, offerOf, planAd } from "./plan.js";
 import { EDIT_STYLES, editStyleOf } from "./styles.js";
+import { holdAwake } from "./awake.js";
 import { VOICE_FX_DIR, ensureVoiceFx } from "./voicefx.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -52,36 +54,6 @@ async function measureSfx() {
     const sec = Number.parseFloat(out);
     if (Number.isFinite(sec)) sfxLengths.set(name, sec);
   }
-  await measureSfxLoudness();
-}
-
-/** Each effect's loudest 400 ms (LUFS), for the loudness guard in build.js. Cached in data/ads/sfx-loudness.json. */
-const sfxLoud = new Map();
-const LOUD_FILE = path.join(DATA_DIR, "sfx-loudness.json");
-async function measureSfxLoudness() {
-  const saved = await fs.readFile(LOUD_FILE, "utf8").then(JSON.parse, () => ({}));
-  let changed = false;
-  for (const name of Object.keys(SFX)) {
-    const file = sfxFile(name);
-    if (!existsSync(file)) continue;
-    const size = (await fs.stat(file)).size;
-    if (saved[name]?.size !== size) {
-      let max = -Infinity;
-      // Padded with silence so sounds shorter than the 400 ms window still get a reading.
-      await run(FFMPEG, ["-hide_banner", "-nostats", "-v", "verbose", "-i", file, "-af", "apad=pad_dur=0.5,ebur128=framelog=verbose", "-f", "null", "-"], {
-        onLine: (l) => {
-          const m = l.match(/M:\s*(-?[\d.]+)/);
-          if (m) max = Math.max(max, Number(m[1]));
-        },
-      }).catch(() => {});
-      if (Number.isFinite(max)) {
-        saved[name] = { size, lufs: max };
-        changed = true;
-      }
-    }
-    if (saved[name]) sfxLoud.set(name, saved[name].lufs);
-  }
-  if (changed) await fs.writeFile(LOUD_FILE, JSON.stringify(saved, null, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -90,12 +62,15 @@ async function measureSfxLoudness() {
 const jobs = new Map(); // ad id → AbortController
 
 async function waitForProject(ad, signal) {
+  const since = Date.now();
   for (;;) {
     const project = await loadProject(ad.projectId);
     if (!project) throw new Error("The video for this ad is gone.");
     if (project.status === "ready") return project;
     if (project.status === "error") throw new Error(project.error || "The video couldn't be processed.");
     if (project.status === "stopped") throw new Error("Processing was stopped for this video.");
+    // A video that stopped moving with nothing working on it would hold up every ad in line behind this one.
+    if (processingStalled(project, { since })) throw new Error("Processing stopped for this video (it hasn't moved in a long time) — try again.");
     await update(ad, { status: "waiting", message: project.message || "Getting the video ready…" });
     await new Promise((resolve, reject) => {
       const t = setTimeout(resolve, 1500);
@@ -215,8 +190,8 @@ async function ensureLogos(ad) {
 }
 
 /** The ad as it stands, in words Claude can revise: the script it plays, its graphics, camera moves and sounds. */
-async function describePrevious(ad) {
-  const doc = await readAdDocument(ad.projectId, ad.clipId);
+async function describePrevious(ad, doc = null) {
+  doc ??= await readAdDocument(ad.projectId, ad.clipId);
   if (!doc) return null;
   const t = (x) => `${x.toFixed(1)}s`;
   const words = doc.tracks.filter((k) => k.kind === "caption").flatMap((k) => k.clips).flatMap((c) => c.words.map((w) => ({ text: w.text, s: c.start + w.s })));
@@ -342,14 +317,37 @@ export async function realignTakes(project, ranges, words, signal, levels = null
       // Fuzzy: the transcriber may hear "Atlas" as "At last" or "ChatGPT" as "Chat GPT" — one or two words whose
       // letters start the same way count as a match.
       const like = (j, k) => Boolean(j && k) && (j === k || j.startsWith(k) || k.startsWith(j) || (j.length >= 3 && k.length >= 3 && j.slice(0, 4) === k.slice(0, 4)));
-      const startAt = [0, 1, 2, 3].find((i) => i < fresh.length && [1, 2].some((n) => like(joined(fresh, i, n), firstKey)));
-      if (startAt > 0) fresh = fresh.slice(startAt);
+      let startAt = [0, 1, 2, 3].find((i) => i < fresh.length && [1, 2].some((n) => like(joined(fresh, i, n), firstKey)));
+      // The first word misheard ("Atlas AI" as "Alice.ai"): the take's next planned words, heard in order, place it —
+      // the heard word nearest to where the first one should be, by the long transcript's spacing.
+      if (startAt === undefined) {
+        for (let m = 1; m <= 3 && startAt === undefined && r.fromIdx + m + 1 <= r.toIdx; m++) {
+          const h = fresh.findIndex((w, j) => j < 7 && key(w) && key(w) === key(words[r.fromIdx + m]) && key(fresh[j + 1]) === key(words[r.fromIdx + m + 1]));
+          if (h < 1) continue;
+          const at = fresh[h].start - (words[r.fromIdx + m].start - words[r.fromIdx].start);
+          let best = -1;
+          for (let j = 0; j < h; j++) if (best < 0 || Math.abs(fresh[j].start - at) < Math.abs(fresh[best].start - at)) best = j;
+          if (best >= 0) startAt = best;
+        }
+      }
+      // What was heard just before and just after the take's own words is where its edges stop: the drifting long
+      // transcript put the cut 0.1–0.3 s into the next line's false start ("…my own agent. That's why"), which then
+      // read as a stutter and cost the next line its start (2026-10-28, "You Get Me At 3 A.M.").
+      const round3 = (n) => Math.round(n * 1000) / 1000;
+      if (startAt > 0) {
+        r.floor = round3(Math.min(fresh[startAt].start - 0.02, fresh[startAt - 1].end + 0.02));
+        fresh = fresh.slice(startAt);
+      }
       // Planned first word not recognised: no widening, only words centred inside the take.
       else if (startAt === undefined) fresh = fresh.filter((w) => (w.start + w.end) / 2 >= r.start);
       const tailFrom = Math.max(0, fresh.length - 4);
       let endAt = -1;
       for (let j = fresh.length - 1; j >= tailFrom; j--) if ([1, 2].some((n) => j - n + 1 >= 0 && like(joined(fresh, j - n + 1, n), lastKey))) { endAt = j; break; }
-      if (endAt >= 0) fresh = fresh.slice(0, endAt + 1);
+      if (endAt >= 0) {
+        // (The next word's start, not this word's end: the transcriber stretches a word's end over the next one.)
+        if (fresh[endAt + 1]) r.wall = round3(Math.max(fresh[endAt].start + 0.15, fresh[endAt + 1].start - 0.03));
+        fresh = fresh.slice(0, endAt + 1);
+      }
       else {
         fresh = fresh.filter((w) => (w.start + w.end) / 2 < r.end);
         // The transcriber dropped the take's last words ("…free trial and | learn more."): they come back from the
@@ -558,7 +556,10 @@ async function refreshQueue() {
   }
 }
 async function pumpEdits() {
+  // The Mac stays awake while anything is editing (ads/awake.js), and may sleep again once the queue is empty.
+  if (!editing && !editQueue.length) holdAwake(false);
   if (editing || !editQueue.length) return;
+  holdAwake(true);
   const id = editQueue.shift();
   const ad = await findAd(id);
   if (!ad) return pumpEdits();
@@ -600,7 +601,7 @@ async function runEdit(ad) {
     const direction = preset && preset.direction !== undefined ? preset.direction : ad.style?.direction && ad.redo && !/switch|style|creative|different/i.test(ad.prompt || "") ? ad.style.direction : pickDirection(ad.id, recentDirections);
     const recentCtas = others.slice(0, 2).map((a) => a.style?.ctaStyle).filter(Boolean);
     const ctaStyle = ad.style?.ctaStyle && ad.redo && !/cta|switch|style|creative|different/i.test(ad.prompt || "") ? ad.style.ctaStyle : pickCtaStyle(ad.id, recentCtas, offerOf(ad.options));
-    const plan = await planAd({
+    const planArgs = {
       ctaStyle,
       direction,
       slides: slides.map((x) => ({ ...x, path: path.join(SLIDES_DIR, x.file) })),
@@ -618,8 +619,17 @@ async function runEdit(ad) {
       tmpDir: path.join(DATA_DIR, "tmp", ad.id),
       signal,
       luts,
-    });
+    };
+    let plan = await planAd(planArgs);
     signal.throwIfAborted();
+    // Claude failed (unreachable, or timed out while the Mac slept): one more try, then the ad says so instead of being
+    // built from the bare fallback and saved as if it were the edit (2026-10-27).
+    if (plan.failed) {
+      await update(ad, { message: `Claude didn't answer (${plan.error}). Trying again…` });
+      plan = await planAd(planArgs);
+      signal.throwIfAborted();
+      if (plan.failed) throw new Error(`Claude couldn't plan this edit (${plan.error}), so nothing was built. Edit it again to retry.`);
+    }
     await update(ad, { message: "Building the timeline: cuts, captions, graphics and sound effects…" });
     await measureSfx();
     // Grade: a LUT the creator picked, else their grade template (Template 1 unless they changed it), else Claude's pick.
@@ -637,7 +647,7 @@ async function runEdit(ad) {
     if (studioReady()) style.palette = "studio";
     style.direction = direction;
     style.ctaStyle = ctaStyle;
-    const options = { ...ad.options, sfxLoudness: (n) => sfxLoud.get(n), slides: await readSlides(), logos, testimonials, lut: lutId || "none", ctaText: OFFERS[offerOf(ad.options)].cta, palette: style.palette, variants: { stat: style.stat, cta: style.cta } };
+    const options = { ...ad.options, slides: await readSlides(), logos, testimonials, lut: lutId || "none", ctaText: OFFERS[offerOf(ad.options)].cta, palette: style.palette, variants: { stat: style.stat, cta: style.cta } };
     const levels = await measureLevels(project, { signal }).catch(() => null);
     // Where the voice really is comes from the original recording: the cleaned copy lifts silence to speech level.
     const voice = (await sourceLevels(project, { signal }).catch(() => null)) || levels;
@@ -667,9 +677,20 @@ async function runEdit(ad) {
     // Where the face is during each graphic, so it's placed in the free space and never over the face.
     await update(ad, { message: "Finding your face so the graphics stay clear of it…" });
     await placeFaces(project, built.doc, signal);
+    // A stretch of 5 s or more with no graphic (lines the cut kept whole) gets graphics on its own lines.
+    const fill = await fillGraphicGaps(ad, project, built.doc, { dryRun: true, by: plan.by, handCut: false }).catch((err) => (signal.aborted ? Promise.reject(err) : (console.error(`Ads [${ad.id}] graphics for the gaps`, err.message), null)));
+    if (fill?.added?.length) {
+      await update(ad, { message: "Adding graphics where the ad goes a while without one…" });
+      const video = built.doc.tracks.find((t) => t.kind === "video").clips;
+      await placeFaces(project, { tracks: [{ kind: "video", clips: structuredClone(video) }, { kind: "graphic", clips: fill.added }] }, signal);
+      const track = built.doc.tracks.find((t) => t.kind === "graphic");
+      track.clips = [...track.clips, ...fill.added].sort((a, b) => a.start - b.start);
+    }
     // A grade the creator chose wins over Claude's pick; their own LUT replaces the built-in grade.
     const grade = options.lut !== "none" ? "none" : GRADES[ad.options?.grade] ? ad.options.grade : built.grade;
     if (grade === "none") built.doc.design.grade = "none";
+    // The reviewer's sound pass (ads/review.js): the music at 11%, every effect at 10%, before it's saved.
+    const soundFixes = reviewSound(built.doc);
     const doc = await writeAdDocument(built.doc);
     // Kept as it left the builder: when the creator later fixes this ad by hand, the difference is the lesson.
     await saveBaseline(ad.id, doc).catch((err) => console.error(`Ads [${ad.id}] baseline`, err.message));
@@ -684,7 +705,12 @@ async function runEdit(ad) {
     const clip = await ensureClip(project, ad, { title, summary: clean(plan.summary, 600), design: doc.design });
     // Follow the face across the vertical crop (tracked once, then cached for previews and renders).
     await update(ad, { message: "Tracking your face so you stay centered…" });
-    await clipFocus(project, clip, { signal }).catch((err) => (signal.aborted ? Promise.reject(err) : console.error(`Ads [${ad.id}] tracking`, err.message)));
+    const focus = await clipFocus(project, clip, { signal }).catch((err) => (signal.aborted ? Promise.reject(err) : (console.error(`Ads [${ad.id}] tracking`, err.message), null)));
+    // The reviewer (ads/review.js): nothing is handed over unchecked. Framing, captions and graphics, on what was saved.
+    await update(ad, { message: "Reviewing the ad: sound, framing, captions and graphics…" });
+    const review = { ...reviewAd(doc, { focus, source: project.source, offset: clip.start }), fixed: soundFixes };
+    if (review.fixed.length) console.log(`Ads [${ad.id}] review fixed: ${review.fixed.join("; ")}`);
+    if (review.issues.length) console.log(`Ads [${ad.id}] review found:\n  ${review.issues.join("\n  ")}`);
     // The big glowing words sit behind the speaker once their cutouts are made (a few seconds each).
     if (built.stats.emphasis) ensureMattes(project, doc);
     // Renders bake the LUT in; the in-app preview gets a graded copy so it doesn't look flat.
@@ -696,7 +722,8 @@ async function runEdit(ad) {
       name: ad.renamed ? ad.name : title,
       grade,
       summary: clean(plan.summary, 800),
-      notice: plan.notice || (plan.not_done ? `Couldn't do: ${clean(plan.not_done, 300)}` : null),
+      notice: [plan.notice || (plan.not_done ? `Couldn't do: ${clean(plan.not_done, 300)}` : null), review.issues.length ? `Review: ${review.issues.slice(0, 4).join(" ")}${review.issues.length > 4 ? ` (+${review.issues.length - 4} more)` : ""}` : null].filter(Boolean).join(" ") || null,
+      review,
       by: plan.by,
       stats: built.stats,
       plan,
@@ -1002,7 +1029,8 @@ export function createAds() {
     const ad = await need(req.params.id);
     const prompt = clean(req.body?.prompt, 2000);
     // A re-edit's brief is the creator correcting the last result: it's kept as a lesson for every future ad.
-    const redo = ad.status === "ready" && Boolean(await readAdDocument(ad.projectId, ad.clipId));
+    // Only a version Claude planned is built on: the bare fallback (no key, or Claude failed) is never "the edit to keep".
+    const redo = ad.status === "ready" && ad.plan?.by === "claude" && Boolean(await readAdDocument(ad.projectId, ad.clipId));
     if (prompt && redo && prompt !== ad.prompt) await addLesson({ ad: ad.name, prompt });
     await update(ad, {
       prompt,
@@ -1281,46 +1309,173 @@ async function refreshCaptions(ad, project, clip, doc, base) {
   return saved;
 }
 
+/** How long an ad can go without a motion graphic before it gets one there (Premium has one every 3–5 s). */
+const GRAPHIC_GAP = 4; // 5 until 2026-10-29: a 4.3 s bare stretch on an extended clip still read as missing graphics
+const FILL_ID = "gfill"; // graphics the gap filler adds, told apart by id (the editor keeps ids, not extra fields)
+
+/** Stretches of the ad's timeline [from, to] (seconds) at least `min` long with no motion graphic on screen. */
+export function graphicGaps(doc, min = GRAPHIC_GAP) {
+  const video = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips);
+  if (!video.length) return [];
+  const D = Math.max(...video.map((c) => c.start + c.duration));
+  const shown = doc.tracks.filter((t) => t.kind === "graphic" && !t.hidden).flatMap((t) => t.clips).sort((a, b) => a.start - b.start);
+  const gaps = [];
+  let t = 0;
+  for (const g of [...shown, { start: D, duration: 0 }]) {
+    if (g.start - t >= min) gaps.push([Math.round(t * 1000) / 1000, Math.round(g.start * 1000) / 1000]);
+    t = Math.max(t, g.start + g.duration);
+  }
+  return gaps;
+}
+
+/** A moment in the source footage → where it plays in the ad's cut, or null when it was cut out. */
+function toTimeline(doc, t) {
+  const c = doc.tracks.filter((k) => k.kind === "video" && !k.hidden).flatMap((k) => k.clips).find((v) => t >= v.sourceStart - 0.02 && t < v.sourceEnd);
+  return c ? c.start + Math.max(0, t - c.sourceStart) / (c.speed || 1) : null;
+}
+
+/**
+ * Graphics for the stretches a hand edit opened up (the creator, 2026-10-28: "if I extended the clips, make sure there
+ * are new motion graphics added"). The creator's cut is final, so nothing else moves: Claude is shown the ad as it
+ * stands and asked for graphics in the bare stretches only, which land on their words in the cut.
+ */
+export async function fillGraphicGaps(ad, project, doc, { dryRun = false, by = ad.plan?.by, handCut = true } = {}) {
+  if (editStyleOf(ad.options)?.simple || by !== "claude" || !hasClaudeKey()) return null;
+  const gaps = graphicGaps(doc);
+  if (!gaps.length) return null;
+  const words = fitWordsToSpeech(await projectWords(project), await findSilences(project).catch(() => []));
+  const testimonials = await fs.readFile(path.join(DATA_DIR, "testimonials.json"), "utf8").then((t) => JSON.parse(t).testimonials || [], () => []);
+  const slides = (await readSlides()).map((x) => ({ ...x, path: path.join(SLIDES_DIR, x.file) }));
+  const where = gaps.map(([a, b]) => `${a.toFixed(1)}–${b.toFixed(1)}s`).join(", ");
+  const plan = await planAd({
+    ctaStyle: ad.style?.ctaStyle || null,
+    direction: ad.style?.direction || null,
+    slides,
+    testimonials,
+    lessons: (await readLessons()).slice(-20),
+    logos: ad.logos || [],
+    options: ad.options,
+    words,
+    previous: await describePrevious(ad, doc),
+    prompt: `${handCut ? "I re-cut this ad by hand and saved it: the script above is my cut" : "The script above is the finished cut"}, and it's final, so keep it word for word. The only change: add motion graphics where the ad goes a while with none, at ${where} on the ad's timeline (the script's times). About one every 3–5 seconds of those stretches, on the lines said there, in this ad's style; use templates this ad doesn't show yet, and no second call to action.`,
+    duration: project.source.duration,
+    aspect: ad.aspect,
+    videoFile: workingFile(project),
+    tmpDir: path.join(DATA_DIR, "tmp", `${ad.id}-fill`),
+    luts: await listLuts(),
+  });
+  if (plan.failed || plan.by !== "claude") return null;
+  const video = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips);
+  const D = Math.max(...video.map((c) => c.start + c.duration));
+  const options = { ...ad.options, slides, logos: ad.logos || [], testimonials, ctaText: OFFERS[offerOf(ad.options)].cta, palette: ad.style?.palette, variants: { stat: ad.style?.stat, cta: ad.style?.cta } };
+  const n = words.length;
+  const gapOf = (t) => gaps.find(([a, b]) => t >= a + 0.2 && t <= b - 1.4);
+  const planned = plannedLooks(plan.graphics || [], options)
+    .filter((g) => g.look !== "cta" && TEMPLATES[g.look]?.job !== "cta")
+    .map((g) => {
+      const at = words[Math.max(0, Math.min(n - 1, g.at))];
+      const until = words[Math.max(0, Math.min(n - 1, Math.max(g.at, g.until ?? g.at)))];
+      const s = at && toTimeline(doc, at.start);
+      if (s == null) return null;
+      const gap = gapOf(s - 0.1);
+      if (!gap) return null;
+      const e = toTimeline(doc, until.end);
+      return { g, t0: Math.max(0, s - 0.1), t1: Math.min(gap[1] - 0.12, e != null && e > s ? e + 0.35 : s + 2), gap };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.t0 - b.t0);
+  const stamp = Date.now().toString(36);
+  const added = placeGraphics(planned, D, options)
+    .map((c) => {
+      const gap = gapOf(c.start);
+      if (!gap) return null;
+      const end = Math.min(c.start + c.duration, gap[1] - 0.12);
+      return end - c.start >= 1.2 ? { ...c, duration: Math.round((end - c.start) * 1000) / 1000 } : null;
+    })
+    .filter(Boolean)
+    .map((c, i) => ({ ...c, id: `${FILL_ID}${stamp}${i}` }));
+  if (!added.length || dryRun) return dryRun ? { added, gaps, plan } : null;
+  // Where the face is under each new graphic, so it's placed clear of it (the cut's own pieces stay as they are).
+  await placeFaces(project, { tracks: [{ kind: "video", clips: structuredClone(video) }, { kind: "graphic", clips: added }] });
+  // Still the same timeline? (the creator may have kept editing while Claude planned)
+  const now = await readAdDocument(ad.projectId, ad.clipId);
+  if (now?.rev !== doc.rev) return null;
+  const next = structuredClone(doc);
+  const track = next.tracks.find((t) => t.kind === "graphic");
+  if (!track) return null;
+  track.clips = [...track.clips, ...added].sort((a, b) => a.start - b.start);
+  const saved = await writeAdDocument(next);
+  console.log(`Ads [${ad.id}] added ${added.length} graphic${added.length > 1 ? "s" : ""} in the bare stretches of the hand edit (${where}): ${added.map((c) => `${c.look}@${c.start}`).join(", ")}`);
+  return saved;
+}
+
+/** The creator's hand edit without the graphics the gap filler added: those aren't theirs to learn from. */
+const withoutFilled = (doc) => ({ ...doc, tracks: doc.tracks.map((t) => (t.kind === "graphic" ? { ...t, clips: t.clips.filter((c) => !String(c.id).startsWith(FILL_ID)) } : t)) });
+
 /**
  * The creator's timeline fixes become lessons (the creator, 2026-09-29: "pay attention to how it's actually supposed
  * to be edited and learn from it"). An ad whose timeline was changed by hand after the builder made it, and left alone
  * for two minutes, is compared with the builder's cut; what changed is written up once per timeline save.
  */
+let learning = false; // one pass at a time: a pass that asks Claude for graphics outlasts the minute between passes
 export async function learnFromHandEdits({ settle = 60_000 } = {}) {
-  const db = await load();
-  for (const ad of db.ads.filter((a) => a.status === "ready" && !jobs.has(a.id))) {
-    let doc = await readAdDocument(ad.projectId, ad.clipId);
-    if (!doc) continue;
-    // Ads made before baselines existed: untouched since the builder made them, the timeline is still its cut.
-    if (doc.rev <= (ad.rev || 0)) {
-      if (!ad.captionsFor && !(await readBaseline(ad.id))) {
-        await saveBaseline(ad.id, doc);
-        await update(ad, { captionsFor: videoSignature(doc) });
+  if (learning) return;
+  learning = true;
+  try {
+    const db = await load();
+    for (const ad of db.ads.filter((a) => a.status === "ready" && !jobs.has(a.id))) {
+      let doc = await readAdDocument(ad.projectId, ad.clipId);
+      if (!doc) continue;
+      // Ads made before baselines existed: untouched since the builder made them, the timeline is still its cut.
+      if (doc.rev <= (ad.rev || 0)) {
+        if (!ad.captionsFor && !(await readBaseline(ad.id))) {
+          await saveBaseline(ad.id, doc);
+          await update(ad, { captionsFor: videoSignature(doc) });
+        }
+        continue;
       }
-      continue;
+      const learned = (ad.learnedRev || 0) >= doc.rev;
+      if (learned && (ad.gapsRev || 0) >= doc.rev) continue;
+      const project = await loadProject(ad.projectId);
+      const clip = project?.clips?.find((c) => c.id === ad.clipId);
+      // Settled: left alone for a minute, or saved to video already (then the captions can't wait).
+      const saving = clip?.render && ["queued", "rendering", "done"].includes(clip.render.status) && (clip.render.docRev ?? ad.renderedRev) === doc.rev;
+      if (!saving && Date.now() - Date.parse(doc.savedAt || 0) < settle) continue;
+      if (!learned) {
+        const base = await readBaseline(ad.id);
+        const theirs = doc;
+        const fixed = await refreshCaptions(ad, project, clip, doc, base).catch((err) => (console.error(`Ads [${ad.id}] captions`, err.message), null));
+        if (fixed) doc = fixed;
+        // The lesson is the creator's own version (before any caption refresh). A baseline rebuilt after the fact
+        // (ads edited before baselines existed) only speaks for the cut and the graphics.
+        const lines = base ? handEdits(base, withoutFilled(theirs), await projectWords(project).catch(() => []), { only: base.rebuilt ? ["cut", "graphics"] : null }) : [];
+        await update(ad, { learnedRev: doc.rev, ...(base ? { handEdits: lines } : {}) });
+        if (lines.length) {
+          const prompt = `The creator fixed this ad by hand after I made it. Learn the pattern behind each fix (what kind of line, graphic or sound they restore or remove), not just these words: ${lines.join(" ")}`;
+          await addLesson({ ad: ad.name, prompt: prompt.slice(0, 2400), adId: ad.id, kind: "hand" });
+          console.log(`Ads [${ad.id}] learned ${lines.length} hand edit${lines.length > 1 ? "s" : ""}`);
+        }
+      }
+      // Stretches the hand edit left bare (clips extended, lines put back) get motion graphics.
+      const before = doc;
+      const filled = await fillGraphicGaps(ad, project, doc).catch((err) => (console.error(`Ads [${ad.id}] graphics for the gaps`, err.message), null));
+      if (filled) {
+        doc = filled;
+        // A video already saved (or saving) from the cut without them is saved again with them.
+        const fresh = await loadProject(ad.projectId);
+        const r = fresh?.clips?.find((c) => c.id === ad.clipId)?.render;
+        const renderedFrom = r ? (r.docRev ?? ad.renderedRev) : null;
+        if (r && (["queued", "rendering"].includes(r.status) || (r.status === "done" && renderedFrom === before.rev))) {
+          if (["queued", "rendering"].includes(r.status)) cancelRender(fresh, ad.clipId);
+          queueRender(await loadProject(ad.projectId), ad.clipId, { design: doc.design, docRev: doc.rev });
+          await update(ad, { renderedRev: doc.rev });
+          console.log(`Ads [${ad.id}] re-saving the video with the new graphics`);
+        }
+      }
+      await update(ad, { gapsRev: doc.rev, ...(filled ? { learnedRev: doc.rev } : {}) });
     }
-    if ((ad.learnedRev || 0) >= doc.rev) continue;
-    const project = await loadProject(ad.projectId);
-    const clip = project?.clips?.find((c) => c.id === ad.clipId);
-    // Settled: left alone for a minute, or saved to video already (then the captions can't wait).
-    const saving = clip?.render && ["queued", "rendering", "done"].includes(clip.render.status) && (clip.render.docRev ?? ad.renderedRev) === doc.rev;
-    if (!saving && Date.now() - Date.parse(doc.savedAt || 0) < settle) continue;
-    const base = await readBaseline(ad.id);
-    const theirs = doc;
-    const fixed = await refreshCaptions(ad, project, clip, doc, base).catch((err) => (console.error(`Ads [${ad.id}] captions`, err.message), null));
-    if (fixed) doc = fixed;
-    if (!base) {
-      await update(ad, { learnedRev: doc.rev });
-      continue;
-    }
-    // The lesson is the creator's own version (before any caption refresh). A baseline rebuilt after the fact
-    // (ads edited before baselines existed) only speaks for the cut and the graphics.
-    const lines = handEdits(base, theirs, await projectWords(project).catch(() => []), { only: base.rebuilt ? ["cut", "graphics"] : null });
-    await update(ad, { learnedRev: doc.rev, handEdits: lines });
-    if (!lines.length) continue;
-    const prompt = `The creator fixed this ad by hand after I made it. Learn the pattern behind each fix (what kind of line, graphic or sound they restore or remove), not just these words: ${lines.join(" ")}`;
-    await addLesson({ ad: ad.name, prompt: prompt.slice(0, 2400), adId: ad.id, kind: "hand" });
-    console.log(`Ads [${ad.id}] learned ${lines.length} hand edit${lines.length > 1 ? "s" : ""}`);
+  } finally {
+    learning = false;
   }
 }
 

@@ -57,6 +57,24 @@ below is rebuilt from scratch as HyperFrames templates; nothing is copied from t
   - a dashed white eyeline draws across.
   One mark per beat, about 1 s each, off before the next.
 
+## 11 + 12. The Premium targets (2026-10-28)
+
+The creator's answer to a bad Premium edit (head cut off, random zooms, one graphic, no build-ups, captions too big):
+"this is perfect… how his face stays in the screen, the zooms ins n outs". Saved as `reels/reel-DfDMY6kIRx4.mp4`
+(86 s, filmed 16:9) and `reels/reel-DehNeOjoa2W.mp4` (27 s, 9:16, "very interactive and viral").
+
+- **Framing.** Always wide enough that the whole head has air above it; the face never touches the frame edge. Reel 11
+  moves the camera only with slow continuous push-ins (a few % over several seconds), never a wide/tight jump per sentence.
+  Reel 12 mostly holds a steady wide shot and gets its energy from cutting to graphics instead.
+- **Captions.** Small: one lowercase word at a time, about a third of the size we use. Reel 11 sits it on the chest just
+  under the chin; reel 12 puts a bolder white word above the head. Key words get a colour treatment (red word, yellow
+  highlight box with dashed selection handles).
+- **Graphics.** Dense: a new visual every 1–3 s. Count-up money ("$1,9…,560 → $2,000,000") over the head, big words that
+  sit behind/over the speaker ("content", "ideation", "results"), a Venn, a "TOP VIDEOS → CLAUDE" flow, document cards,
+  bar charts on white full-screen cards, B-roll cutaways; reel 12 adds full-screen app/UI scenes (retro computer typing
+  "CLAUDE_" word by word with the speech, phone menus, logo tiles, editor timelines).
+- **Look.** Reel 11: teal/orange cinematic grade. Music bed with whips and risers into each full-screen scene.
+
 ## How to use them
 
 - The Ads planner has a **Screen Dive** direction (`ads/plan.js`) that leads with these. Any direction can still pick them

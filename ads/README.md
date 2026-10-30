@@ -128,7 +128,8 @@ lines (cream, then the accent), soft blur-ins and blur-outs, a slow 3D settle, a
 - **Creative directions:** every new ad gets one of `DIRECTIONS` (plan.js): Ink & Ember, Kinetic Type, Product Demo,
   Command Center, Team & Orbit or Quiet Luxury. It is never the same as the last two ads', and it is kept in `ad.style.direction`.
   The planner builds the ad around that family's scenes with creative freedom inside the kit.
-- **Mix:** the ad music bed is `AD_MUSIC_LEVEL` 0.112, and sound effects are scaled by `AD_SFX_GAIN` 0.7 (build.js).
+- **Mix:** the music at `AD_MUSIC_LEVEL` 0.11 and every sound effect at `AD_SFX_LEVEL` 0.10 (build.js), held there by the
+  reviewer (`review.js`), which also checks framing, captions and graphics before an ad is marked ready.
 - **Banned in ads (the creator, 2026-09-28):** the glitch sounds and the underwater voice effect (`BANNED_SFX` and
   `BANNED_VOICEFX` in `build.js`). Both still exist for the rest of the app.
 - **Shared kit** (`motion/templates/_parts.js`): `KIT_CSS` (`.mk-card`, `.mk-kick`, `.mk-h` with `.ac`, status dots, the scene

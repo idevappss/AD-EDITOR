@@ -29,10 +29,13 @@ brackets); the planner must never work against them.
 5. **The voice always plays clean:** no voice effects at all (no muffle, underwater or phone; they make "the voice go
    off"). [BANNED_VOICEFX]
 6. **No glitch sounds.** [BANNED_SFX]
-7. **Sound effects sit under the voice.** Swooshes, whooshes, air and risers are never louder than the music bed;
-   everything else is at least 12 dB under the voice. The music bed is at 0.112. [sfxCap, AD_SFX_GAIN, AD_MUSIC_LEVEL]
-8. **Captions** sit in the middle, or right on top of a card or CTA; they go to the very top or bottom only to clear a
-   face, a graphic, a CTA or a logo. [placeCaptions]
+7. **The mix, as the timeline shows it:** the music at 11% (10% if that's too loud), every sound effect at 9–10%.
+   [AD_MUSIC_LEVEL, AD_SFX_LEVEL; checked and fixed by ads/review.js]
+8. **Captions** sit in the middle, a bit down; when a graphic is in the middle they go to the bottom or the top; never
+   over a face, which comes before everything else. [pickCaptionY]
+8b. **The reviewer** (ads/review.js) checks every ad before it's handed over: the sound levels (fixed), the face
+   tracked and centered, the head never cut off by a zoom, not too tight or too wide, captions there and placed as
+   above, and motion graphics off the face and off the captions. Its findings go on the ad (`ad.review`, the notice).
 9. **Graphics follow the Atlas kit** (minimal dark glass, soft blur-ins, no bounce), with 2–4 full-screen kit scenes where
    the words say what Atlas does, and a different creative direction from the last two ads. [DIRECTIONS]
 10. **The ATLAS logo is never distorted, and nothing disappears into its background:** on the coral ground the accent
@@ -63,6 +66,18 @@ brackets); the planner must never work against them.
     the same as the last two ads. The words stay the offer's. [CTA_STYLES]
 
 ## Cuts
+- **Cut like a professional editor: the mistakes go, the message stays** (the creator, 2026-10-28, after re-cutting
+  "Atlas Took Everything Off" by hand: "you're cutting out parts that shouldn't be cut"). The builder's cut was 28 s; theirs was
+  38.5 s, because every line of the story came back:
+  - the payoff of the hook's setup: "So having an agent that literally does all the business side of my online business has
+    allowed me to scale exponentially."
+  - the second half of a sentence: "…which literally does everything for me so that **I only have to worry about creating the
+    content, helping the people inside my offers.**" (the builder stopped on "so that")
+  - an item of a list: "it runs my ads, **I get to send it videos and it edits it for me.**"
+  What they did cut: the flub "it gets people to run my ads" (kept the clean "it runs my ads"), a tangent the speaker trailed
+  off and restarted out of ("This has [been life changing for me as a mother… I needed help so bad and this has] taken
+  everything off my plate", spliced mid-sentence so it plays as one clean line), the silence before the first word, and the
+  tail after "link below". No length target: the ad runs as long as the clean story takes.
 - **Tighten the speech first.** Start on the first word of the good take at frame 0. Cut the earlier false start, the
   "okay, ready?" slate, a flubbed word ("spitting, spitting"), and a repeated phrase in the CTA ("click below, click the link
   below" becomes "click below"). Keep the script order exactly.
@@ -171,8 +186,9 @@ Rule: **when the speaker names a brand or product, its logo appears huge, at the
 - **Riser/impact/shimmer/ding SFX** need to exist in the SFX library with these names.
 
 ## Lessons from the creator's corrections (2026-09-23)
-- **Cut ruthlessly.** After the value lines ("…eight hours a day"), go straight to the final clean CTA take ("learn how you
-  can put AI agents in your business today…"). Everything between them (early CTAs, restarts, re-explaining) goes.
+- **Cut the junk between the value lines and the CTA.** After the value lines ("…eight hours a day"), go straight to the final
+  clean CTA take ("learn how you can put AI agents in your business today…"). Early CTAs, restarts and re-explaining between
+  them go; lines that tell the story never do (see Cuts).
 - **No dead air.** Every pause where nothing is said comes out. Watch for chatter the transcript missed ("hold on",
   "okay"): a word that lasts far too long usually hides it.
 - **Don't overwhelm the ear.** At most one boom in the hook. The product reveal swells in (whoosh and riser) with no boom on

@@ -25,10 +25,17 @@ export const EDIT_STYLES = {
   premium: {
     name: "Premium",
     brief:
-      "Cinematic and polished: let the lines breathe, subtle motion only (slow push-ins and fades, no shakes or whips), few graphics and every one of them elegant, captions marked the way the master edit marks them (quotes in italics, a phrase in caps, one red box). Sound effects only where they land a reveal; the music bed does the work.",
+      "Cinematic and polished, and alive with motion the way the creator's reference reels are: a motion graphic or scene every 3–5 seconds while the speaker talks, so a 40-second ad carries 8–12 of them. Reach for count-up numbers on every figure, big words behind or beside the speaker on the key ideas, checklists, flows and diagrams of the steps, product and app screens, and the name title early. Make 3–5 of them full-screen scenes (this overrides any 'at most two scenes' or '3–5 template moments' above), cut into with a blur or a whip. The framing stays wide and calm (the build handles the slow push): add camera punch-ins only on the 3–5 lines that matter most, at least 6 seconds apart, and no shakes, flashes or glitches on the speaker. Captions marked the way the master edit marks them (quotes in italics, a phrase in caps, one red box). The music bed carries the sound; the build adds a whip on each scene cut and a riser building into the big scenes.",
     // The master edit the creator called perfect (motion/references/sound-study.md), 2026-10-23.
     direction: "master-edit",
     pace: { pauseMax: 0.45, pauseKeep: 0.2 },
+    // The creator's reference reels (2026-10-28, motion/references/reel-study.md 11 + 12): the shot stays wide with the
+    // whole head in frame, drifts slowly in and eases into the planned punch-ins (motion/render.js "cinematic"), and
+    // the captions are small (a third smaller than the 0.8 default).
+    framing: "cinematic",
+    captionScale: 0.45,
+    // A riser builds into every full-screen scene (ads/build.js), not just the first: the reels' "build up" sound.
+    buildUps: true,
   },
   custom: {
     name: "Custom",

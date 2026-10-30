@@ -98,3 +98,17 @@ two booms, and an effect under a sentence without something on screen for it.
 | The to-do list cut from 20 to 3 (reel 8) | `focus-count` |
 
 The Premium style now uses the **Master Edit** direction (`ads/plan.js`), which leads with these.
+
+## The creator's correction (2026-10-28)
+
+After hearing it in their ads: "turn down the volume on the sound effects, it's way too loud… turn down the music as
+well… so it's not overpowering what the person is saying… try not to use so many sound effects, only when it makes the
+most sense." So the house mix now sits under the reference:
+
+- **Effects 6 dB down** across the board (`ROLE_LEVEL` in `motion/sounds.js`: cut −14, ui −20, land −21, riser −8, boom −7
+  against the voice; house sounds through `AD_SFX_GAIN` 0.35 and `SFX_TRIM` in `ads/build.js`).
+- **Music 4 dB down**: `BED_LEVEL` −19 (studio bed 0.126), the house ad bed 0.071.
+- **Fewer effects** (`thinSounds` in `ads/build.js`): the opening boom, risers into scenes, a number's landing and whips on
+  scene cuts first; clicks only where nothing else is near. No two moments within 1.5 s, booms 8 s apart, two risers at
+  most, about one moment per 4.5 s. The Premium ads of 2026-10-28 went from ~30 effects to 5–7.
+- Every video also opens with a zoom-out now (`withOpening` in `motion/render.js`).

@@ -865,7 +865,7 @@ function adView(ad) {
           </label>
           ${opts.editStyle === "talking-head"
             ? `<p class="muted small">Basic (talking head): every flub, retake and pause cut, white captions in the middle, the shot following your face, and a pop-in on the lines that matter. No graphics or sound effects; music starts off.</p>`
-            : `<p class="muted small">Always applied: cut every retake, under 30 s, big numbers, a checklist of the 3 main points, the strongest hook first, and an ending that sells the offer below. Sound effects, music and captions start on.</p>
+            : `<p class="muted small">Always applied: every retake, flub and pause cut (never the story), big numbers, a checklist of the 3 main points, the strongest hook first, and an ending that sells the offer below. Sound effects, music and captions start on.</p>
           <div class="ad-ideas">${IDEAS.map((i) => `<button class="chip chip-link" data-idea="${esc(i)}" ${busy ? "disabled" : ""}>+ ${esc(i)}</button>`).join("")}</div>`}
           <div class="field ad-logos" ${opts.editStyle === "talking-head" ? "hidden" : ""}><span>Brand logos <em>— when the brand is named, its logo pops up</em></span>
             <div class="ad-logo-row">

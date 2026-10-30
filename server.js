@@ -49,6 +49,7 @@ import {
   startLongEdit,
   queueRender,
   clipFocus,
+  resumeInterrupted,
   retranscribeProject,
   warmProject,
 } from "./lib/pipeline.js";
@@ -440,6 +441,7 @@ app.post("/api/projects/:id/stop", withProject((_req, project) => {
 app.post("/api/projects/:id/retry", withProject((_req, project) => {
   if (BUSY_STATUSES.includes(project.status)) throw new Error("This project is already processing.");
   delete project.stopRequested;
+  delete project.resumes;
   Object.assign(project, { status: "queued", message: "Queued", error: null });
   queueProcessing(project);
   return project;
@@ -1560,13 +1562,26 @@ app.delete("/api/study/references/:refId", handle(async (req) => {
 
 // ---------- startup ----------
 
-// Anything mid-flight when the server stopped can't resume; flag it so the UI offers a retry.
+// A video mid-processing when the server stopped goes back in line and is processed again, ads' videos included: an
+// ad's edit waits on its video, and one left "transcribing" forever blocked every ad behind it (2026-10-23).
+{
+  const everyProject = await listProjects({ ads: true });
+  const interrupted = everyProject.filter((p) => BUSY_STATUSES.includes(p.status));
+  const resumed = resumeInterrupted(everyProject);
+  for (const project of interrupted) {
+    // A working copy cut off halfway is never used; start it clean.
+    for (const name of await fs.readdir(projectDir(project.id)).catch(() => [])) if (/^work-.*\.tmp\.mp4$/.test(name)) await fs.rm(path.join(projectDir(project.id), name), { force: true });
+    await saveProject(project);
+  }
+  for (const project of resumed) {
+    console.log(`[${project.id}] processing again after the restart`);
+    queueProcessing(project);
+  }
+}
+
+// Anything else mid-flight when the server stopped can't resume; flag it so the UI offers a retry.
 for (const project of await listProjects()) {
   let dirty = false;
-  if (BUSY_STATUSES.includes(project.status)) {
-    Object.assign(project, { status: "error", message: "Processing failed", error: "Interrupted when the server restarted." });
-    dirty = true;
-  }
   for (const item of [...(project.clips || []), ...(project.edits || [])]) {
     if (RENDER_BUSY.includes(item.render?.status)) {
       item.render = item.render.previous

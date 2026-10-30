@@ -67,14 +67,16 @@ export const SFX_ROLE = Object.fromEntries(Object.entries(LIBRARY).map(([id, l])
  * from the reference edit (references/sound-study.md, 2026-10-23): whips on cuts poke just above the music bed, clicks
  * and counter ticks sit well under the voice, a riser's peak and the two booms reach the voice's own level. The cut
  * whip is set 3 dB over the reference's −11 because the first test render (2026-10-23) measured it that much light in
- * the finished mix.
+ * the finished mix. Then every role came down 6 dB (the creator, 2026-10-28: "turn down the volume on the sound
+ * effects, it's way too loud").
  */
-export const ROLE_LEVEL = { cut: -8, ui: -14, land: -15, riser: -2, boom: -1 };
+export const ROLE_LEVEL = { cut: -14, ui: -20, land: -21, riser: -8, boom: -7 };
 /**
- * The music bed: the reference sits 14 dB under the voice; we use 15, the line the render review (lib/review.js)
- * flags music as loud at, so the review loop never turns the studio bed down.
+ * The music bed: the reference sits 14 dB under the voice; we used 15, the line the render review (lib/review.js)
+ * flags music as loud at, then 4 dB lower again (the creator, 2026-10-28: turn the music down "so it's not
+ * overpowering what the person is saying").
  */
-export const BED_LEVEL = -15;
+export const BED_LEVEL = -19;
 
 /** Ambience (whooshes, swooshes, air, risers): never louder than the music bed. */
 export const AMBIENT_SFX = new Set(["whoosh", "whoosh-short", "whoosh-cinematic", "swoosh", "bigswoosh", "air", "revswell", "riser", "atlas-whoosh", "atlas-riser"]);

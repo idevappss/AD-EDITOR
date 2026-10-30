@@ -5,7 +5,7 @@
 //   graphic clips  { look, text, sub, highlight, items[], icon, position }   → HTML + GSAP on the clip timeline
 //   sfx clips      { sfx, volume }                                           → <audio> on the composition
 import { ASPECTS, normalizeDesign } from "../lib/compose.js";
-import { CAPTION_LINE, REEL_SAFE } from "../lib/facezone.js";
+import { REEL_SAFE } from "../lib/facezone.js";
 import { FLOAT_IN, TEMPLATES, isScene, soften } from "./templates/index.js";
 import { KIT_CSS } from "./templates/_parts.js";
 
@@ -162,6 +162,10 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
   const blocks = [];
   const usedTemplates = new Set();
   const cues = [];
+  // Where the face sits while a graphic is up: the framing's step then (opened a little, OPEN), zoomed from its origin.
+  const program = out.includes('id="video-punch"') ? framingProgram(doc, graphics) : [];
+  const faceUnder = (f, t0, t1) => faceOnScreen(f, program, t0, t1, OPEN);
+  const shots = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips);
   for (const c of graphics) {
     const id = `ag-${c.id}`;
     const t0 = r3(c.start);
@@ -279,7 +283,7 @@ export function injectAdLayers(html, doc, { sfxSrc, slideSrc = () => null, logoS
       blocks.push(`<div id="${id}-bd" class="ag-bd tone-${tone}"><i class="ag-grain" id="${id}-gr"></i>${motes.map(([x, y, , sz], k) => `<i class="ag-mote" id="${id}-e${k}" style="left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;width:${px(sz)}px;height:${px(sz)}px;--g:${px(sz * 3)}px"></i>`).join("")}</div>`);
     }
     blocks.push(`<div id="${id}" class="ag ag-look-${c.look || "headline"} ${where}">${inner}</div>`);
-    cues.push({ id, look: c.look || "headline", t0, t1, items, stat, pos, strike: Boolean(c.strike), mark: markLetters, kw: kickerWords, full, tr: full ? transition || TRANSITIONS.slice(0, 4)[graphics.filter((g) => isScene(TEMPLATES[g.look], g)).indexOf(c) % 4] : null, motes: motes.map(([, , sp, , tw]) => [r3(sp * 30 * u), r3(tw)]), face: c.face && !full && !TEMPLATES[c.look]?.overlay ? { top: r3(ANCHOR - (ANCHOR - c.face.top) * OPEN), bottom: r3(ANCHOR - (ANCHOR - c.face.bottom) * OPEN) } : null, count: statCount(t1 - t0), times: c.look === "list" ? listTimes(t1 - t0, items) : null, data: tplData, low: TEMPLATES[c.look]?.position === "bottom", hideCap: Boolean(TEMPLATES[c.look]?.hideCaptions || (c.look === "stat" && c.variant === "studio")) });
+    cues.push({ id, look: c.look || "headline", t0, t1, items, stat, pos, strike: Boolean(c.strike), mark: markLetters, kw: kickerWords, full, tr: full ? transition || TRANSITIONS.slice(0, 4)[graphics.filter((g) => isScene(TEMPLATES[g.look], g)).indexOf(c) % 4] : null, motes: motes.map(([, , sp, , tw]) => [r3(sp * 30 * u), r3(tw)]), face: c.face && !full && !TEMPLATES[c.look]?.overlay ? faceUnder(headBand(c.face, shots, t0, t1), t0, t1) : null, count: statCount(t1 - t0), times: c.look === "list" ? listTimes(t1 - t0, items) : null, data: tplData, low: TEMPLATES[c.look]?.position === "bottom", hideCap: Boolean(TEMPLATES[c.look]?.hideCaptions || (c.look === "stat" && c.variant === "studio")) });
   }
 
   const audio = sounds
@@ -637,23 +641,176 @@ export const CAMERA_MOVES = [...FRAME_MOVES, "shake", "zoom-blur", "whip", "flas
 const cameraClips = (doc) => kind(doc, "camera").filter((c) => FRAME_MOVES.includes(c.move || "punch"));
 const hitClips = (doc) => kind(doc, "camera").filter((c) => !FRAME_MOVES.includes(c.move || "punch"));
 
-/** The most the shot can zoom at time t and keep the whole face in frame (zooming from ANCHOR). */
+/** Where the top of the head (hair included) sits: the face band is the face box, eyebrows to chin, and the skull rises about half a face above it. */
+export const headTop = (f) => f.top - 0.55 * (f.bottom - f.top);
+
+/**
+ * Where face band f sits on screen between t0 and t1 under a framing program: at the most zoomed-in step meanwhile, so
+ * a punch-in halfway through a graphic or a caption can't grow the face into it. `rest` is the scale with no program.
+ */
+export function faceOnScreen(f, program, t0, t1 = t0, rest = 1) {
+  let s = 0, o = ANCHOR;
+  program.forEach((p, i) => {
+    const next = program[i + 1]?.t ?? Infinity;
+    if (p.t > t1 + 0.01 || next <= t0 + 0.01) return;
+    const z = Math.max(p.scale, p.to ?? 0);
+    if (z >= s) [s, o] = [z, p.oy ?? ANCHOR];
+  });
+  if (!s) s = rest;
+  return { top: r3(o - (o - f.top) * s), bottom: r3(o - (o - f.bottom) * s) };
+}
+
+/**
+ * What a graphic keeps clear of while it's up (the creator, 2026-10-29: never on the face): the whole head, hair to
+ * chin, as far as it reaches in the graphic's own face band and in every shot under it. Keeping clear of the face band
+ * alone put cards on the speaker's hair and forehead whenever they went above it.
+ */
+export function headBand(face, shots, t0, t1) {
+  const bands = [face, ...shots.filter((v) => v.face && v.start < t1 && v.start + v.duration > t0).map((v) => v.face)].filter(Boolean);
+  return { top: r3(Math.min(...bands.map(headTop))), bottom: Math.max(...bands.map((f) => f.bottom)) };
+}
+
+/** Where an ad's caption sits by default: the middle of the frame, a bit down (the creator, 2026-10-29). */
+export const AD_CAPTION_LINE = 0.6;
+/**
+ * The band a caption stays inside (0–1 of the frame height). On 9:16 the top and bottom 14% sit under the app's own UI
+ * (lib/facezone.js REEL_SAFE: the name, the post's caption), so a caption never goes past them.
+ */
+export const captionSafe = (tall) => (tall ? { top: REEL_SAFE.top / 100, bottom: REEL_SAFE.bottom / 100 } : { top: 0.05, bottom: 0.93 });
+
+/**
+ * Where a caption goes, as the px height of its centre (the creator, 2026-10-29): the middle of the frame a bit down
+ * (o.line); when a graphic is up there, the bottom or the top instead, so the two never clash; and never over a face,
+ * which comes before everything else. Plain ES5 that uses nothing outside itself: the composition script carries it
+ * as written (captionPlacement) and the reviewer (ads/review.js) runs the very same rule.
+ * @param o  { line (0–1), h (caption height, px), FH (frame height, px), safeT, safeB (0–1), faces, boxes: [{ a, b }] px }
+ */
+export function pickCaptionY(o) {
+  var h = o.h, FH = o.FH;
+  var clear = function (y, bands) { return !bands.some(function (b) { return y + h / 2 > b.a && y - h / 2 < b.b; }); };
+  var inside = function (y) { return y - h / 2 >= o.safeT * FH - 0.5 && y + h / 2 <= o.safeB * FH + 0.5; };
+  var line = o.line * FH, bottom = o.safeB * FH - h / 2, top = o.safeT * FH + h / 2;
+  var tries = [line];
+  // Something happening in the middle: straight to the bottom, or the top.
+  if (!clear(line, o.boxes)) tries.push(bottom, top);
+  // A face there: the nearest clear height, lower first.
+  for (var dy = 0.02 * FH; dy < FH; dy += 0.02 * FH) tries.push(line + dy, line - dy);
+  tries.push(bottom, top);
+  var all = o.faces.concat(o.boxes);
+  var pick = tries.filter(function (y) { return inside(y) && clear(y, all); })[0];
+  // No room clear of both: the face wins over the graphic.
+  if (pick == null) pick = tries.filter(function (y) { return inside(y) && clear(y, o.faces); })[0];
+  return pick == null ? bottom : pick;
+}
+
+/**
+ * The most a shot with face band f can zoom from origin oy (share of the frame height) and keep the whole head and
+ * the chin in frame. Capping on the face box alone cut the creator's speakers off at the forehead (2026-10-28).
+ */
+function zoomCap(f, oy = ANCHOR) {
+  if (!f) return PUNCH;
+  const head = headTop(f);
+  // A pivot on the top edge holds the top of the frame still, so nothing more leaves there.
+  const top = oy > 0.001 && oy - head > 0.01 ? (oy - 0.03) / (oy - head) : PUNCH;
+  const bottom = f.bottom > oy + 0.01 ? (0.97 - oy) / (f.bottom - oy) : PUNCH;
+  return Math.max(1, Math.min(PUNCH, top, bottom));
+}
+
+/** The most the shot can zoom at time t and keep the whole head in frame (zooming from ANCHOR). */
 function faceCapper(video) {
-  return (t) => {
-    const c = video.find((v) => t >= v.start - 0.01 && t < v.start + v.duration) || video.at(-1);
-    const f = c?.face;
-    if (!f) return PUNCH;
-    const top = ANCHOR - f.top > 0.01 ? (ANCHOR - 0.03) / (ANCHOR - f.top) : PUNCH;
-    const bottom = f.bottom > ANCHOR + 0.01 ? (0.97 - ANCHOR) / (f.bottom - ANCHOR) : PUNCH;
-    return Math.max(1, Math.min(PUNCH, top, bottom));
-  };
+  return (t) => zoomCap((video.find((v) => t >= v.start - 0.01 && t < v.start + v.duration) || video.at(-1))?.face);
+}
+
+/**
+ * The talking-head style's (framing "key") zoom origin for a shot: ANCHOR, as it always was, unless popping in to
+ * TIGHT from there would cut the top of the head off. Then it rises just enough to keep the head 3% inside the frame,
+ * which for a speaker framed high is just under the head, as in the cinematic framing. Zooming from ANCHOR, a speaker
+ * whose forehead sits at 18% of the frame couldn't zoom at all (2026-10-28) and the pop-ins vanished.
+ */
+function keyOrigin(clip) {
+  const f = clip?.face;
+  if (!f) return ANCHOR;
+  const head = headTop(f);
+  if (head <= 0.03) return r3(Math.max(0, head - 0.02));
+  return r3(Math.min(ANCHOR, (head * TIGHT - 0.03) / (TIGHT - 1)));
+}
+
+// Cinematic framing (design.framing "cinematic", the Premium style; the creator's reference reels of 2026-10-28,
+// motion/references/reel-study.md 11 + 12): every shot opens wide and drifts slowly in, the Camera track's punch-ins
+// ease in and back out, and nothing else moves. Zooms pivot just above the head, so the head stays where it is and
+// the shot tightens toward the face instead of cropping the top of the head off.
+const C_DRIFT = 1.05; // where a shot's slow push ends up
+const C_PUNCH = 1.22; // a planned punch-in
+const C_PUSH = 1.14; // a planned slow push
+const C_IN = 0.5; // seconds to ease into a punch
+const C_OUT = 0.7; // seconds to ease back out
+
+/** The zoom origin for a shot (share of the frame height): just above the top of the head. */
+function cinematicOrigin(clip) {
+  const f = clip?.face;
+  if (!f) return ANCHOR;
+  return r3(Math.min(0.6, Math.max(0, headTop(f) - 0.02)));
+}
+
+/**
+ * A move whose line starts in the last moments of a shot (Claude anchors it on the first word, often said right at a
+ * cut) starts on the cut instead, in the next shot, rather than being lost between the two.
+ */
+const snapToCuts = (video, moves) =>
+  moves.map((m) => {
+    const next = video.find((v) => v.start > m.start && v.start - m.start < 0.3);
+    return next ? { ...m, start: next.start, duration: Math.max(0.5, m.start + m.duration - next.start) } : m;
+  });
+
+function cinematicProgram(video, moves) {
+  const program = [];
+  moves = snapToCuts(video, moves);
+  for (const c of video) {
+    const oy = cinematicOrigin(c);
+    const f = c.face;
+    // Zooming from oy keeps the head; only the chin can leave the frame, at the bottom.
+    const cap = (s) => r3(f ? Math.max(1, Math.min(s, (0.97 - oy) / Math.max(0.01, f.bottom - oy))) : s);
+    const t0 = c.start;
+    const t1 = c.start + c.duration;
+    const driftTo = cap(C_DRIFT);
+    const drift = (t) => r3(1 + (driftTo - 1) * Math.min(1, Math.max(0, (t - t0) / c.duration)));
+    let t = t0;
+    const glide = (until) => {
+      if (until - t > 0.05) program.push({ t: r3(t), scale: drift(t), to: drift(until), dur: r3(until - t), oy, ease: "drift" });
+      t = until;
+    };
+    for (const m of moves.filter((x) => x.start >= t0 - 0.01 && x.start < t1 - 0.3).sort((a, b) => a.start - b.start)) {
+      if (m.start < t) continue; // overlaps the last one
+      const end = Math.min(m.start + m.duration, t1 - 0.05);
+      glide(m.start);
+      const from = drift(t);
+      if (m.move === "pull") {
+        program.push({ t: r3(t), scale: from, to: 1, dur: r3(Math.max(0.3, end - t)), oy });
+        t = end;
+        continue;
+      }
+      const peak = m.move === "push" ? cap(C_PUSH) : cap(C_PUNCH);
+      const into = m.move === "push" ? Math.max(0.3, end - t) : Math.min(C_IN, Math.max(0.2, end - t));
+      program.push({ t: r3(t), scale: from, to: peak, dur: r3(into), oy, ease: m.move === "push" ? "glide" : "in" });
+      const back = Math.min(C_OUT, t1 - end);
+      if (back > 0.1) {
+        program.push({ t: r3(end), scale: peak, to: drift(end + back), dur: r3(back), oy, ease: "out" });
+        t = end + back;
+      } else t = t1;
+    }
+    glide(t1);
+    if (!program.length || program.at(-1).t < t0) program.push({ t: r3(t0), scale: 1, oy });
+  }
+  if (!program.length || program[0].t > 0.01) program.unshift({ t: 0, scale: 1, oy: cinematicOrigin(video[0]) });
+  return program;
 }
 
 export function framingProgram(doc, graphics = graphicClips(doc)) {
   const video = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips).sort((a, b) => a.start - b.start);
   if (!video.length) return [];
   const D = Math.max(...video.map((c) => c.start + c.duration));
-  const moves = cameraClips(doc);
+  let moves = cameraClips(doc);
+  if (doc.design?.framing === "cinematic") return withOpening(cinematicProgram(video, moves), video);
   const words = doc.tracks
     .filter((t) => t.kind === "caption")
     .flatMap((t) => t.clips)
@@ -669,6 +826,7 @@ export function framingProgram(doc, graphics = graphicClips(doc)) {
   // Talking head (design.framing "key"): no rhythm. The shot holds wide and pops in only where the Camera track
   // punches in, on the lines where something important is said, then pops back out.
   const key = doc.design?.framing === "key";
+  if (key) moves = snapToCuts(video, moves); // so the pop-in eases in on the new shot instead of under the cut
   const sorted = key ? [] : [...beats].filter((t) => t < D - 0.8).sort((a, b) => a - b);
   const covered = (t) => graphics.find((g) => t >= g.start - 0.05 && t < g.start + g.duration) || moves.find((m) => t >= m.start - 0.05 && t < m.start + m.duration);
   const program = [];
@@ -697,39 +855,88 @@ export function framingProgram(doc, graphics = graphicClips(doc)) {
   }
   program.sort((a, b) => a.t - b.t);
   if (!program.length || program[0].t > 0.01) program.unshift({ t: 0, scale: WIDE });
-  // Never zoom the face out of frame: zooming from ANCHOR moves a point at y to ANCHOR - (ANCHOR - y)·s, so each
-  // scale is capped by where the face reaches in that piece (with a little margin above the head and below the chin).
-  const capFor = faceCapper(video);
-  for (const p of program) {
-    const cap = capFor(p.t);
-    p.scale = r3(Math.min(p.scale, cap));
-    if (p.to) p.to = r3(Math.max(p.scale, Math.min(p.to, capFor(p.t + p.dur - 0.01))));
+  // Never zoom the face out of frame: zooming from origin o moves a point at y to o - (o - y)·s, so each scale is
+  // capped by where the face reaches in that piece (with a little margin above the head and below the chin).
+  const clipAt = (t) => video.find((v) => t >= v.start - 0.01 && t < v.start + v.duration) || video.at(-1);
+  if (key) {
+    // Each shot zooms from its own origin (keyOrigin), set on its cut, where the picture changes anyway. A pop-in
+    // that runs over the cut carries on into the next shot.
+    const cuts = [];
+    for (const c of video.slice(1)) {
+      const t = r3(c.start);
+      if (program.some((p) => Math.abs(p.t - t) < 0.01)) continue;
+      const prev = program.findLast((p) => p.t < t);
+      if (prev?.to && prev.t + prev.dur > t) continue; // mid-push: it finishes from where it started
+      cuts.push({ t, scale: prev?.to ?? prev?.scale ?? WIDE, cut: true });
+    }
+    program.push(...cuts);
+    program.sort((a, b) => a.t - b.t);
   }
-  return program;
+  for (const p of program) {
+    if (key) p.oy = keyOrigin(clipAt(p.t));
+    const oy = p.oy ?? ANCHOR;
+    p.scale = r3(Math.min(p.scale, zoomCap(clipAt(p.t)?.face, oy)));
+    if (p.to) p.to = r3(Math.max(p.scale, Math.min(p.to, zoomCap(clipAt(p.t + p.dur - 0.01)?.face, oy))));
+  }
+  return withOpening(program, video);
+}
+
+// The opening zoom-out (the creator, 2026-10-28: "for both premium and basic, give me a zoomout at the beginning of
+// all videos"): the first frame starts tight on the speaker and eases out to the shot's own framing. Every framing
+// style gets it; whatever the style had planned for those first moments picks up from where it lands.
+const OPEN_ZOOM = 1.3; // how much tighter the first frame is than the framing it eases out to
+const OPEN_OUT = 0.85; // seconds to ease out
+
+function withOpening(program, video) {
+  if (!program.length || !video.length) return program;
+  const D = Math.max(...video.map((c) => c.start + c.duration));
+  const end = r3(Math.min(OPEN_OUT, D - 0.1));
+  if (end < 0.3) return program;
+  // The framing the program has at `end` (a step that's still moving is read along its way).
+  let target = program[0].scale, oy = program[0].oy;
+  for (const p of program) {
+    if (p.t > end + 1e-6) break;
+    if (p.oy != null) oy = p.oy;
+    target = p.to && end < p.t + p.dur ? p.scale + (p.to - p.scale) * ((end - p.t) / p.dur) : p.to ?? p.scale;
+  }
+  // Zoomed from the style's own origin the head may leave the frame; then the opening zooms from just above the head
+  // and glides the origin back to the style's on its way out, so it lands exactly on the style's framing.
+  const base = oy ?? ANCHOR, above = cinematicOrigin(video[0]);
+  const openOy = zoomCap(video[0].face, above) > zoomCap(video[0].face, base) + 0.02 ? above : base;
+  const from = r3(Math.max(target, Math.min(target * OPEN_ZOOM, zoomCap(video[0].face, openOy))));
+  if (from - target < 0.04) return program; // the face already fills the frame: nowhere to zoom out from
+  const rest = [];
+  for (const p of program) {
+    if (p.t >= end - 1e-6) rest.push(p);
+    else if (p.to && p.t + p.dur > end + 0.05) rest.push({ ...p, t: end, scale: r3(target), dur: r3(p.t + p.dur - end) });
+  }
+  const glide = openOy !== base ? { oy: openOy, oyTo: base } : oy != null ? { oy } : {};
+  return [{ t: 0, scale: from, to: r3(target), dur: end, ...glide, ease: "open" }, ...rest];
 }
 
 /**
  * The caption-placement script (placeCaptions), for inside a composition script that defines CUES (the graphics'
  * cues) and FH (the frame height).
- * Captions (the creator, 2026-10-22, after the reference reel in lib/facezone.js): centered on the speaker's chest
- * line, right on top of a card or CTA in the lower half when one is up. A caption that would cover the face (eyes
- * included), a graphic, a CTA or a logo moves to the nearest clear height, under the chin before above the head, and
- * never out of the reel safe zone. The talking-head style (framing "key") skips the card rule. Placed once per caption
- * for its whole time on screen (static, so seek-safe). The face band uses the most zoomed-in the shot gets meanwhile.
+ * Captions (the creator, 2026-10-29): the middle of the frame a bit down (AD_CAPTION_LINE); to the bottom or the top
+ * when a graphic is up there; never over a face, head included, which comes first (pickCaptionY). Never out of the
+ * reel safe zone (captionSafe). Placed once per caption for its whole time on screen (static, so seek-safe). The face
+ * band uses the most zoomed-in the shot gets meanwhile.
  */
 function captionPlacement(doc, graphics, tall) {
-  // Where the face sits on screen: each piece's face band and the framing's zoom steps.
-  const capFaces = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips).filter((v) => v.face).map((v) => [r3(v.start), r3(v.start + v.duration), v.face.top, v.face.bottom]);
-  const capZoom = framingProgram(doc, graphics).map((p) => [p.t, p.scale, p.to ?? p.scale, p.dur ?? 0]);
-  const key = doc.design?.framing === "key";
-  return `var CAP_FACES = ${JSON.stringify(capFaces)}, CAP_ZOOM = ${JSON.stringify(capZoom)}, CAP_ANCHOR = ${ANCHOR}, CAP_KEY = ${key}, CAP_LINE = ${tall ? CAPTION_LINE / 100 : 0.5};
+  // Where the head sits on screen (hair to chin): each piece's face band and the framing's zoom steps.
+  const capFaces = doc.tracks.filter((t) => t.kind === "video" && !t.hidden).flatMap((t) => t.clips).filter((v) => v.face).map((v) => [r3(v.start), r3(v.start + v.duration), r3(headTop(v.face)), v.face.bottom]);
+  const capZoom = framingProgram(doc, graphics).map((p) => [p.t, p.scale, p.to ?? p.scale, p.dur ?? 0, p.oy ?? ANCHOR]);
+  const safe = captionSafe(tall);
+  return `var CAP_FACES = ${JSON.stringify(capFaces)}, CAP_ZOOM = ${JSON.stringify(capZoom)}, CAP_ANCHOR = ${ANCHOR}, CAP_LINE = ${AD_CAPTION_LINE};
+          ${pickCaptionY.toString()}
+          // The most zoomed-in the shot gets while a caption is up, and the origin it zooms from.
           function zoomIn(s, e) {
-            var z = 1;
+            var z = 1, o = CAP_ANCHOR;
             CAP_ZOOM.forEach(function (p, i) {
               var next = CAP_ZOOM[i + 1] ? CAP_ZOOM[i + 1][0] : Infinity;
-              if (p[0] < e && next > s) z = Math.max(z, p[1], p[2]);
+              if (p[0] < e && next > s && Math.max(p[1], p[2]) >= z) { z = Math.max(p[1], p[2]); o = p[4]; }
             });
-            return z;
+            return { z: z, o: o };
           }
           function placeCaptions() {
             var caps = document.querySelectorAll(".cap");
@@ -752,29 +959,15 @@ function captionPlacement(doc, graphics, tall) {
             caps.forEach(function (cap) {
               var s = Number(cap.getAttribute("data-start")) || 0, e = s + (Number(cap.getAttribute("data-duration")) || 0);
               var inner = cap.firstElementChild, h = (inner && inner.offsetHeight) || 0.06 * FH;
-              var avoid = [], above = [];
-              var z = zoomIn(s, e);
+              var faces = [], busy = [];
+              var zo = zoomIn(s, e), z = zo.z, o = zo.o;
               CAP_FACES.forEach(function (f) {
-                if (f[0] < e && f[1] > s) avoid.push({ a: (CAP_ANCHOR - (CAP_ANCHOR - f[2]) * z) * FH - pad, b: (CAP_ANCHOR - (CAP_ANCHOR - f[3]) * z) * FH + pad });
+                if (f[0] < e && f[1] > s) faces.push({ a: (o - (o - f[2]) * z) * FH - pad, b: (o - (o - f[3]) * z) * FH + pad });
               });
               boxes.forEach(function (g) {
-                if (g.t0 < e && g.t1 > s) {
-                  avoid.push({ a: g.a - pad, b: g.b + pad });
-                  if (g.a > 0.4 * FH) above.push(g.a - 2 * pad - h / 2);
-                }
+                if (g.t0 < e && g.t1 > s) busy.push({ a: g.a - pad, b: g.b + pad });
               });
-              // The reel safe zone (lib/facezone.js REEL_SAFE): on 9:16 the top and bottom 14% sit under the app's own UI
-              // (name, the post's caption), so a caption never goes past them.
-              var SAFE_T = ${tall ? REEL_SAFE.top / 100 : 0.05}, SAFE_B = ${tall ? REEL_SAFE.bottom / 100 : 0.93};
-              var low = (SAFE_B - 0.01) * FH - h / 2;
-              // The chest line, then outward from it in small steps (lower first), so the first clear height is the nearest.
-              var near = [CAP_LINE * FH];
-              for (var dy = 0.02 * FH; dy < FH; dy += 0.02 * FH) near.push(CAP_LINE * FH + dy, CAP_LINE * FH - dy);
-              var tries = CAP_KEY ? near : above.concat(near);
-              var pick = tries.filter(function (y) {
-                return y - h / 2 >= SAFE_T * FH && y + h / 2 <= SAFE_B * FH && !avoid.some(function (b) { return y + h / 2 > b.a && y - h / 2 < b.b; });
-              })[0];
-              cap.style.top = Math.round(pick == null ? low : pick) + "px";
+              cap.style.top = Math.round(pickCaptionY({ line: CAP_LINE, h: h, FH: FH, safeT: ${safe.top}, safeB: ${safe.bottom}, faces: faces, boxes: busy })) + "px";
             });
           }`;
 }
@@ -812,13 +1005,20 @@ export function adFraming(html, doc, graphics) {
         // ---- framing (motion/render.js) ----
         (function () {
           var P = ${JSON.stringify(program)}, KEY = ${doc.design?.framing === "key"};
-          gsap.set("#video-punch", { scale: P[0].scale, transformOrigin: "50% ${ANCHOR * 100}%" });
+          // Cinematic steps carry their own zoom origin (just above the head) and ease: a constant-speed drift, an eased
+          // punch in, an eased release.
+          var EASE = { drift: "none", glide: "sine.inOut", "in": "power3.out", out: "power2.inOut", open: "power3.out" };
+          var origin = function (p) { return "50% " + ((p.oy != null ? p.oy : ${ANCHOR}) * 100) + "%"; };
+          gsap.set("#video-punch", { scale: P[0].scale, transformOrigin: origin(P[0]) });
           P.forEach(function (p, i) {
             var from = i ? (P[i - 1].to || P[i - 1].scale) : p.scale;
+            if (p.oy != null) tl.set("#video-punch", { transformOrigin: origin(p) }, p.t);
             if (p.to) {
               tl.set("#video-punch", { scale: p.scale }, p.t);
-              tl.fromTo("#video-punch", { scale: p.scale }, { scale: p.to, duration: p.dur, ease: "sine.inOut", immediateRender: false }, p.t);
-            } else if (KEY && i && from !== p.scale) {
+              tl.fromTo("#video-punch", { scale: p.scale }, { scale: p.to, duration: p.dur, ease: EASE[p.ease] || "sine.inOut", immediateRender: false }, p.t);
+              // The opening zoom-out can glide its origin back to the style's as it eases out.
+              if (p.oyTo != null) tl.fromTo("#video-punch", { transformOrigin: origin(p) }, { transformOrigin: origin({ oy: p.oyTo }), duration: p.dur, ease: EASE[p.ease] || "sine.inOut", immediateRender: false }, p.t);
+            } else if (KEY && i && from !== p.scale && !p.cut) {
               // Talking head: an animated pop, eased in and out, instead of a hard jump.
               var zoomingIn = p.scale > from;
               tl.fromTo("#video-punch", { scale: from }, { scale: p.scale, duration: zoomingIn ? 0.45 : 0.6, ease: zoomingIn ? "power3.out" : "power2.inOut", immediateRender: false }, p.t);
